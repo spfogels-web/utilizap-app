@@ -5,12 +5,7 @@
   --foreground: #171717;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+
 
 @media (prefers-color-scheme: dark) {
   :root {
@@ -23,4 +18,236 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* UTILIZAP — Premium centered wallet button */
+.uz-wallet-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  padding: 10px 16px !important;
+  border-radius: 14px !important;
+
+  background: linear-gradient(
+    135deg,
+    rgba(99,102,241,0.22),
+    rgba(168,85,247,0.18),
+    rgba(250,204,21,0.10)
+  ) !important;
+
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  color: rgba(255,255,255,0.92) !important;
+  font-weight: 600 !important;
+
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.06) inset,
+    0 12px 30px rgba(0,0,0,0.45),
+    0 0 26px rgba(99,102,241,0.18) !important;
+
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease !important;
+}
+
+/* Force adapter base class to obey our theme */
+.wallet-adapter-button.uz-wallet-btn {
+  background: linear-gradient(
+    135deg,
+    rgba(99,102,241,0.22),
+    rgba(168,85,247,0.18),
+    rgba(250,204,21,0.10)
+  ) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+}
+
+.uz-wallet-btn:hover {
+  transform: translateY(-1px) scale(1.01) !important;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.10) inset,
+    0 16px 40px rgba(0,0,0,0.55),
+    0 0 34px rgba(168,85,247,0.25) !important;
+}
+
+.uz-wallet-btn:active {
+  transform: translateY(0) scale(0.985) !important;
+}
+
+/* Icon spacing inside WalletMultiButton */
+.uz-wallet-btn .wallet-adapter-button-start-icon {
+  margin-right: 10px !important;
+}
+/* ================================
+   UTILIZAP — Premium UI Upgrades
+   ================================ */
+
+/* HERO / EXECUTION CARD: flowing brand energy under smoked glass */
+.uz-execution-card {
+  position: relative;
+  border-radius: 24px;
+  overflow: hidden;
+
+  /* Base smoked glass */
+  background: rgba(10, 10, 12, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+    0 30px 80px rgba(0, 0, 0, 0.65);
+
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+/* Moving “plasma” color layer (blue/purple/gold) */
+.uz-execution-card::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  pointer-events: none;
+
+  background:
+    radial-gradient(closest-side, rgba(59, 130, 246, 0.46), transparent 62%),
+    radial-gradient(closest-side, rgba(168, 85, 247, 0.46), transparent 64%),
+    radial-gradient(closest-side, rgba(250, 204, 21, 0.34), transparent 60%),
+    linear-gradient(
+      120deg,
+      rgba(59, 130, 246, 0.22),
+      rgba(168, 85, 247, 0.20),
+      rgba(250, 204, 21, 0.12),
+      rgba(59, 130, 246, 0.22)
+    );
+
+  background-size: 60% 60%, 55% 55%, 50% 50%, 220% 220%;
+  background-position: 15% 25%, 80% 20%, 55% 85%, 0% 50%;
+
+  filter: blur(34px) saturate(1.25);
+  opacity: 0.55;
+
+  animation: uzCardFlow 16s ease-in-out infinite;
+}
+
+/* Premium highlight/shine layer */
+.uz-execution-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+
+  background:
+    radial-gradient(900px 380px at 50% -10%,
+      rgba(255, 255, 255, 0.10),
+      transparent 60%
+    ),
+    linear-gradient(to bottom,
+      rgba(255, 255, 255, 0.06),
+      transparent 35%,
+      rgba(0, 0, 0, 0.18)
+    );
+
+  opacity: 0.95;
+}
+
+/* Keep all real content above the animated layers */
+.uz-execution-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Smooth flowing animation */
+@keyframes uzCardFlow {
+  0% {
+    transform: translate3d(-2%, -1%, 0) rotate(0deg);
+    background-position: 15% 25%, 80% 20%, 55% 85%, 0% 50%;
+  }
+  50% {
+    transform: translate3d(2%, 1%, 0) rotate(10deg);
+    background-position: 25% 35%, 70% 30%, 45% 75%, 100% 50%;
+  }
+  100% {
+    transform: translate3d(-2%, -1%, 0) rotate(0deg);
+    background-position: 15% 25%, 80% 20%, 55% 85%, 0% 50%;
+  }
+}
+
+/* ================================
+   Wallet button — premium theme
+   ================================ */
+
+.uz-wallet-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  padding: 10px 16px !important;
+  border-radius: 14px !important;
+
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.22),
+    rgba(168, 85, 247, 0.18),
+    rgba(250, 204, 21, 0.10)
+  ) !important;
+
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+  font-weight: 600 !important;
+
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+    0 12px 30px rgba(0, 0, 0, 0.45),
+    0 0 26px rgba(99, 102, 241, 0.18) !important;
+
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease !important;
+}
+
+/* Force wallet-adapter base class to obey our theme */
+.wallet-adapter-button.uz-wallet-btn {
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.22),
+    rgba(168, 85, 247, 0.18),
+    rgba(250, 204, 21, 0.10)
+  ) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+}
+
+.uz-wallet-btn:hover {
+  transform: translateY(-1px) scale(1.01) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.10) inset,
+    0 16px 40px rgba(0, 0, 0, 0.55),
+    0 0 34px rgba(168, 85, 247, 0.25) !important;
+}
+
+.uz-wallet-btn:active {
+  transform: translateY(0) scale(0.985) !important;
+}
+
+.uz-wallet-btn .wallet-adapter-button-start-icon {
+  margin-right: 10px !important;
+}
+
+/* Optional: pulse ONLY when disconnected (subtle CTA) */
+.wallet-adapter-button.uz-wallet-btn:not(.wallet-adapter-button-connected) {
+  animation: uzPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes uzPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+      0 12px 30px rgba(0, 0, 0, 0.45),
+      0 0 22px rgba(99, 102, 241, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.10) inset,
+      0 18px 42px rgba(0, 0, 0, 0.55),
+      0 0 36px rgba(168, 85, 247, 0.35);
+  }
 }
