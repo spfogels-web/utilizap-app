@@ -1,5 +1,11 @@
+import type { Metadata } from "next";
 import "./globals.css";
 import Providers from "./providers";
+
+export const metadata: Metadata = {
+  title: "UTILIZAP",
+  description: "Non-custodial USDC wallet-to-wallet transfers on Solana",
+};
 
 export default function RootLayout({
   children,

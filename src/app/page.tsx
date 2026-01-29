@@ -22,7 +22,7 @@ type TxStage =
 
 export default function Home() {
   const { connection } = useConnection();
-  const { publicKey, connected, signTransaction } = useWallet();
+  const { publicKey, connected, signTransaction, disconnect } = useWallet();
 
   const [solBalance, setSolBalance] = useState<number | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<number | null>(null);
@@ -48,7 +48,6 @@ export default function Home() {
       setUsdcBalance(null);
       return;
     }
-
     try {
       const sol = await getSolBalance(connection, publicKey);
       const usdc = await getSplTokenBalance(connection, publicKey);
@@ -62,6 +61,7 @@ export default function Home() {
 
   useEffect(() => {
     refreshBalances();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publicKey, connection]);
 
   const canSend = useMemo(() => {
@@ -115,95 +115,154 @@ export default function Home() {
     txStage === "confirming";
 
   return (
-    <main className="min-h-screen bg-black text-white flex items-center justify-center p-6">
-      <div className="uz-execution-card max-w-md w-full rounded-2xl p-6">
+    <main className="min-h-screen text-white bg-black relative">
+      {/* Premium background layers */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_20%_10%,rgba(120,80,255,.20),transparent_60%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_80%_20%,rgba(255,210,120,.14),transparent_60%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(900px_600px_at_50%_90%,rgba(70,140,255,.16),transparent_60%)]" />
+        <div className="absolute inset-0 opacity-30 bg-[linear-gradient(to_right,rgba(255,255,255,.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.06)_1px,transparent_1px)] bg-[size:64px_64px]" />
+      </div>
 
-        {/* Logo */}
-        <div className="flex justify-center mb-4">
-          <img
-            src="/brand/utilizap-logo.png"
-            alt="UTILIZAP"
-            draggable={false}
-            className="h-16 w-auto select-none"
-          />
-        </div>
-
-        {/* Subtitle */}
-        <p className="text-zinc-400 text-center mb-6">
-          Non-custodial USDC wallet-to-wallet transfers on Solana
-        </p>
-
-        {/* Wallet Button */}
-        {mounted ? (
-          <div className="flex justify-center">
-            <WalletMultiButton className="uz-wallet-btn" />
-          </div>
-        ) : (
-          <button
-            className="w-full rounded-md px-4 py-2 bg-white/10 text-white/70 cursor-not-allowed"
-            disabled
-          >
-            Loading wallet…
-          </button>
-        )}
-
-        {/* Connected Wallet */}
-        {connected && publicKey && (
-          <div className="mt-6 bg-black/40 border border-white/10 rounded-xl p-4 text-center space-y-2">
-            <p className="text-sm text-zinc-400">Connected Wallet</p>
-            <p className="font-mono text-lg">
-              {shortAddr(publicKey.toBase58())}
-            </p>
-            <div className="text-sm text-zinc-300">
-              <div>SOL: {solBalance ?? "—"}</div>
-              <div>USDC (devnet): {usdcBalance ?? "—"}</div>
+      {/* App shell */}
+      <div className="relative mx-auto w-full max-w-5xl px-4 sm:px-6 py-8">
+        {/* Header */}
+        <header className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md px-4 sm:px-6 py-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <img
+              src="/brand/utilizap-logo.png"
+              alt="UTILIZAP"
+              draggable={false}
+              className="h-10 w-auto select-none"
+            />
+            <div className="min-w-0">
+              <div className="font-extrabold tracking-tight text-lg leading-tight">
+                UTILIZAP
+              </div>
+              <div className="text-xs text-zinc-400 truncate">
+                Non-custodial USDC wallet-to-wallet transfers on Solana
+              </div>
             </div>
-            <p className="text-xs text-zinc-500">Devnet (safe testing)</p>
           </div>
-        )}
 
-        {/* Send Panel */}
-        <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4">
-          <h3 className="font-semibold mb-3">Send USDC (Devnet)</h3>
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs text-zinc-300">
+              <span className="inline-block h-2 w-2 rounded-full bg-emerald-400/80" />
+              Devnet
+            </span>
 
-          <input
-            value={recipient}
-            onChange={(e) => setRecipient(e.target.value)}
-            placeholder="Recipient Solana address"
-            className="w-full mb-3 rounded-lg bg-black/40 border border-white/10 p-3 text-sm"
-          />
+            {mounted ? (
+              <WalletMultiButton className="uz-wallet-btn" />
+            ) : (
+              <button
+                className="rounded-lg px-4 py-2 bg-white/10 text-white/70 cursor-not-allowed"
+                disabled
+              >
+                Loading…
+              </button>
+            )}
+          </div>
+        </header>
 
-          <input
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="Amount (USDC)"
-            className="w-full mb-3 rounded-lg bg-black/40 border border-white/10 p-3 text-sm"
-          />
+        {/* Content grid */}
+        <section className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Left: Wallet + balances */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5 sm:p-6">
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="text-lg font-bold">Wallet</h2>
+              <span className="text-xs text-zinc-400">
+                Secure • Non-custodial
+              </span>
+            </div>
 
-          <button
-            onClick={onSendUsdc}
-            disabled={!canSend || isBusy}
-            className="w-full rounded-lg bg-white/90 text-black font-semibold py-3 disabled:opacity-50"
-          >
-            {isBusy ? "Processing…" : "Send USDC"}
-          </button>
+            {connected && publicKey ? (
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/40 p-4 text-center space-y-2">
+                <p className="text-sm text-zinc-400">Connected Wallet</p>
+                <p className="font-mono text-lg">
+                  {shortAddr(publicKey.toBase58())}
+                </p>
 
-          {showTxPanel && (
-            <div className="mt-4 text-xs">
-              {txError && <div className="text-red-400">{txError}</div>}
-              {explorerUrl && (
-                <a
-                  href={explorerUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-blue-400 underline"
+                <div className="text-sm text-zinc-300">
+                  <div>SOL: {solBalance ?? "—"}</div>
+                  <div>USDC (devnet): {usdcBalance ?? "—"}</div>
+                </div>
+
+                <p className="text-xs text-zinc-500">Devnet (safe testing)</p>
+
+                <button
+                  onClick={() => disconnect()}
+                  className="w-full mt-3 rounded-lg bg-white/10 border border-white/10 text-white font-semibold py-2 hover:bg-white/15"
                 >
-                  View transaction →
-                </a>
+                  Disconnect Wallet
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/40 p-4 text-sm text-zinc-300">
+                Connect a wallet to view balances and send USDC.
+              </div>
+            )}
+
+            <div className="mt-4 text-xs text-zinc-500">
+              Tip: Keep this on Devnet until you’re happy with UX + security.
+            </div>
+          </div>
+
+          {/* Right: Send */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5 sm:p-6">
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="text-lg font-bold">Send USDC</h2>
+              <span className="text-xs text-zinc-400">Devnet</span>
+            </div>
+
+            <div className="mt-4">
+              <label className="text-xs text-zinc-400">Recipient</label>
+              <input
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                placeholder="Recipient Solana address"
+                className="w-full mt-2 mb-4 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+              />
+
+              <label className="text-xs text-zinc-400">Amount</label>
+              <input
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="Amount (USDC)"
+                className="w-full mt-2 mb-4 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+              />
+
+              {/* ✅ PREMIUM PRIMARY BUTTON */}
+              <button
+                onClick={onSendUsdc}
+                disabled={!canSend || isBusy}
+                className="uz-primary-btn w-full rounded-xl py-3 font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isBusy ? "Processing…" : "Send USDC"}
+              </button>
+
+              {showTxPanel && (
+                <div className="mt-4 text-xs">
+                  {txError && <div className="text-red-400">{txError}</div>}
+                  {explorerUrl && (
+                    <a
+                      href={explorerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-400 underline"
+                    >
+                      View transaction →
+                    </a>
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        </section>
+
+        {/* Footer */}
+        <footer className="mt-8 text-center text-xs text-zinc-500">
+          UTILIZAP • Non-custodial payments • Devnet environment
+        </footer>
       </div>
     </main>
   );
