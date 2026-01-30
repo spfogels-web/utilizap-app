@@ -42,6 +42,7 @@ export default function Home() {
     ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
     : null;
 
+  // Hydration-safe UI gates for wallet adapter / QR stuff
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -117,6 +118,17 @@ export default function Home() {
     txStage === "submitted" ||
     txStage === "confirming";
 
+  // Premium number formatting (cleaner + larger)
+  const solDisplay =
+    solBalance === null
+      ? "—"
+      : solBalance < 1
+      ? solBalance.toFixed(4)
+      : solBalance.toFixed(2);
+
+  const usdcDisplay =
+    usdcBalance === null ? "—" : usdcBalance.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
   return (
     <main className="min-h-screen text-white bg-black relative">
       {/* Premium background layers */}
@@ -176,25 +188,44 @@ export default function Home() {
             </div>
 
             {connected && publicKey ? (
-              <div className="mt-4 rounded-xl border border-white/10 bg-black/40 p-4 text-center space-y-2">
-                <p className="text-sm text-zinc-400">Connected Wallet</p>
-                <p className="font-mono text-lg">
-                  {shortAddr(publicKey.toBase58())}
-                </p>
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/40 p-4 text-center space-y-3">
+                <div className="space-y-1">
+                  <p className="text-sm text-zinc-400">Connected Wallet</p>
+                  <p className="font-mono text-lg">
+                    {shortAddr(publicKey.toBase58())}
+                  </p>
+                </div>
 
-                <div className="text-sm text-zinc-300">
-                  <div>SOL: {solBalance ?? "—"}</div>
-                  <div>USDC (devnet): {usdcBalance ?? "—"}</div>
+                {/* ✅ Cleaner, larger, premium balances */}
+                <div className="mt-1 flex items-center justify-center gap-3">
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 min-w-[150px]">
+                    <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                      SOL
+                    </div>
+                    <div className="mt-1 text-2xl font-extrabold tracking-tight text-white">
+                      {solDisplay}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 min-w-[170px]">
+                    <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                      USDC
+                      <span className="ml-2 text-[10px] text-zinc-500">(devnet)</span>
+                    </div>
+                    <div className="mt-1 text-2xl font-extrabold tracking-tight text-white">
+                      {usdcDisplay}
+                    </div>
+                  </div>
                 </div>
 
                 <p className="text-xs text-zinc-500">Devnet (safe testing)</p>
 
-                {/* ✅ RECEIVE QR (shows your wallet QR) */}
-                <ReceiveQr className="mt-4" />
+                {/* ✅ RECEIVE QR */}
+                <ReceiveQr className="mt-2" />
 
                 <button
                   onClick={() => disconnect()}
-                  className="uz-danger-btn w-full mt-4 py-2"
+                  className="uz-danger-btn w-full mt-3 py-2"
                 >
                   Disconnect Wallet
                 </button>
@@ -222,24 +253,27 @@ export default function Home() {
                   onChange={(e) => setRecipient(e.target.value)}
                   placeholder="Recipient Solana address"
                   className="w-full rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                  inputMode="text"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
 
                 {mounted ? (
-  <QrScanButton
-    validate={(v) => isValidSolanaAddress(v.trim())}
-    onScan={(value) => setRecipient(value.trim())}
-    disabled={!connected}
-  />
-) : (
-  <button
-    type="button"
-    className="uz-qr-btn opacity-60 cursor-not-allowed"
-    disabled
-  >
-    <span className="uz-qr-text">Scan</span>
-  </button>
-)}
-
+                  <QrScanButton
+                    validate={(v) => isValidSolanaAddress(v.trim())}
+                    onScan={(value) => setRecipient(value.trim())}
+                    disabled={!connected}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="uz-qr-btn opacity-60 cursor-not-allowed"
+                    disabled
+                  >
+                    <span className="uz-qr-text">Scan</span>
+                  </button>
+                )}
               </div>
 
               <label className="text-xs text-zinc-400">Amount</label>
@@ -248,16 +282,16 @@ export default function Home() {
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="Amount (USDC)"
                 className="w-full mt-2 mb-4 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                inputMode="decimal"
               />
 
               <button
-  onClick={onSendUsdc}
-  disabled={!canSend || isBusy}
-  className="uz-primary-btn w-full py-3 disabled:cursor-not-allowed"
->
-  {isBusy ? "Processing…" : "Send USDC"}
-</button>
-
+                onClick={onSendUsdc}
+                disabled={!canSend || isBusy}
+                className="uz-primary-btn w-full rounded-xl py-3 font-semibold text-white disabled:cursor-not-allowed"
+              >
+                {isBusy ? "Processing…" : "Send USDC"}
+              </button>
 
               {showTxPanel && (
                 <div className="mt-4 text-xs">

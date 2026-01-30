@@ -382,3 +382,202 @@ body {
 .uz-danger-btn:hover::before{
   transform: translateX(120%);
 }
+
+/* ================================
+   Wallet Adapter Button — Mobile Fix
+   Prevents "Select Wallet" giant button after disconnect
+   ================================ */
+
+.uz-wallet-btn{
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  white-space: nowrap !important;
+  max-width: 180px;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* On small screens: force compact button */
+@media (max-width: 640px){
+  .uz-wallet-btn{
+    max-width: 140px !important;
+    padding: 10px 12px !important;
+    border-radius: 14px !important;
+    gap: 8px !important;
+  }
+
+  /* hide long text like "Select Wallet" */
+  .uz-wallet-btn .wallet-adapter-button-start-icon{
+    margin-right: 0 !important;
+  }
+
+  /* Most important: limit label width + ellipsis */
+  .uz-wallet-btn .wallet-adapter-button-text{
+    display: inline-block !important;
+    max-width: 80px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+}
+
+@media (max-width: 640px){
+  .uz-wallet-btn .wallet-adapter-button-text{
+    max-width: 0 !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* keep icon visible so it still feels like wallet */
+  .uz-wallet-btn{
+    width: 52px !important;
+    padding: 10px 10px !important;
+  }
+}
+
+/* ================================
+   UTILIZAP — Wallet Button (Premium + Mobile-safe)
+   Applied via: <WalletMultiButton className="uz-wallet-btn" />
+   ================================ */
+
+.uz-wallet-btn{
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 10px !important;
+
+  padding: 10px 14px !important;
+  border-radius: 16px !important;
+
+  /* premium purple glass */
+  background: linear-gradient(
+    135deg,
+    rgba(var(--uz-blue), .32),
+    rgba(var(--uz-purple), .28)
+  ) !important;
+
+  border: 1px solid rgba(255,255,255,.14) !important;
+
+  box-shadow:
+    0 14px 40px rgba(120,80,255,.18),
+    inset 0 1px 0 rgba(255,255,255,.16) !important;
+
+  color: rgba(255,255,255,.94) !important;
+  font-weight: 700 !important;
+  letter-spacing: .2px !important;
+
+  cursor: pointer !important;
+  user-select: none !important;
+
+  /* critical: prevent mobile blowout */
+  white-space: nowrap !important;
+  max-width: 190px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+
+  transition: transform .15s ease, filter .15s ease, box-shadow .15s ease !important;
+}
+
+.uz-wallet-btn:hover{
+  transform: translateY(-1px) !important;
+  filter: brightness(1.06) !important;
+  box-shadow:
+    0 18px 56px rgba(120,80,255,.26),
+    inset 0 1px 0 rgba(255,255,255,.20) !important;
+}
+
+.uz-wallet-btn:active{
+  transform: translateY(0) !important;
+  filter: brightness(0.98) !important;
+}
+
+/* Label inside WalletMultiButton */
+.uz-wallet-btn .wallet-adapter-button-text{
+  display: inline-block !important;
+  max-width: 120px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Make the icon tighter */
+.uz-wallet-btn .wallet-adapter-button-start-icon{
+  margin-right: 0 !important;
+}
+
+/* ================================
+   Mobile fix for the disconnect state "Select Wallet"
+   ================================ */
+@media (max-width: 640px){
+  .uz-wallet-btn{
+    max-width: 140px !important;
+    padding: 10px 12px !important;
+    border-radius: 14px !important;
+  }
+
+  .uz-wallet-btn .wallet-adapter-button-text{
+    max-width: 78px !important;
+  }
+}
+
+/* ================================
+   UTILIZAP — Copy Button (Premium Blue)
+   Matches Scan button
+   ================================ */
+
+.uz-copy-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:.4rem;
+
+  padding:.6rem 1rem;
+  border-radius: 999px;
+
+  background: linear-gradient(
+    135deg,
+    rgba(70,120,255,.95),
+    rgba(120,160,255,.95)
+  );
+
+  border: 1px solid rgba(120,160,255,.55);
+
+  box-shadow:
+    0 6px 20px rgba(70,120,255,.35),
+    inset 0 0 0 1px rgba(255,255,255,.12);
+
+  color:#ffffff;
+  font-weight:700;
+  font-size:.85rem;
+
+  cursor:pointer;
+  white-space:nowrap;
+
+  transition:
+    transform .15s ease,
+    box-shadow .15s ease,
+    filter .15s ease;
+}
+
+.uz-copy-btn:hover{
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow:
+    0 10px 30px rgba(70,120,255,.45),
+    inset 0 0 0 1px rgba(255,255,255,.18);
+}
+
+.uz-copy-btn:active{
+  transform: translateY(0);
+  filter: brightness(.98);
+}
+
+.uz-copy-btn:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+  transform:none;
+  box-shadow:none;
+}

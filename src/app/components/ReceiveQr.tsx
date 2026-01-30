@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import QRCode from "qrcode";
 
@@ -8,89 +8,77 @@ type Props = {
   className?: string;
 };
 
-export default function ReceiveQr({ className }: Props) {
+export default function ReceiveQr({ className = "" }: Props) {
   const { publicKey, connected } = useWallet();
   const [dataUrl, setDataUrl] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  const address = useMemo(() => publicKey?.toBase58() ?? "", [publicKey]);
+  const address = publicKey?.toBase58() ?? "";
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      setErr(null);
+    if (!connected || !address) {
       setDataUrl(null);
-
-      if (!connected || !address) return;
-
-      try {
-        const url = await QRCode.toDataURL(address, {
-          margin: 1,
-          width: 320,
-          errorCorrectionLevel: "M",
-        });
-
-        if (!cancelled) setDataUrl(url);
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message ?? "Failed to generate QR");
-      }
+      return;
     }
 
-    run();
-    return () => {
-      cancelled = true;
-    };
+    QRCode.toDataURL(address, {
+      margin: 1,
+      width: 220,
+      color: {
+        dark: "#000000",
+        light: "#ffffff",
+      },
+    }).then(setDataUrl);
   }, [connected, address]);
 
-  if (!connected) {
-    return (
-      <div className={className}>
-        <div className="text-sm text-zinc-300">
-          Connect a wallet to display your Receive QR code.
-        </div>
-      </div>
-    );
-  }
+  const onCopy = async () => {
+    if (!address) return;
+    await navigator.clipboard.writeText(address);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
+
+  if (!connected) return null;
 
   return (
-    <div className={className}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-white">Receive</div>
-          <div className="text-xs text-zinc-400">
-            Let someone scan to pay your wallet
-          </div>
+    <div
+      className={`mt-4 rounded-xl border border-white/10 bg-black/40 p-4 ${className}`}
+    >
+      {/* ✅ CENTERED HEADER */}
+      <div className="text-center space-y-1">
+        <div className="text-sm font-semibold">Receive</div>
+        <div className="text-xs text-zinc-400">
+          Let someone scan to pay your wallet
         </div>
+      </div>
 
+      {/* Copy button */}
+      <div className="mt-3 flex justify-center">
         <button
-          type="button"
-          onClick={() => navigator.clipboard.writeText(address)}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/90 hover:bg-white/10"
+          onClick={onCopy}
+          className="rounded-full px-4 py-2 text-sm font-semibold text-white
+                     bg-gradient-to-r from-blue-500 to-indigo-500
+                     hover:brightness-110 transition"
         >
-          Copy
+          {copied ? "Copied!" : "Copy"}
         </button>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 p-4">
-        {err && <div className="text-xs text-red-400">{err}</div>}
-
-        {!dataUrl ? (
-          <div className="text-xs text-zinc-400">Generating QR…</div>
-        ) : (
-          <div className="flex items-center justify-center">
-            <img
-              src={dataUrl}
-              alt="Wallet QR Code"
-              className="h-56 w-56 rounded-xl border border-white/10 bg-black/30 p-2"
-              draggable={false}
-            />
-          </div>
-        )}
-
-        <div className="mt-3 text-center font-mono text-xs text-zinc-400 break-all">
-          {address}
+      {/* QR */}
+      {dataUrl && (
+        <div className="mt-4 flex justify-center">
+          <img
+            src={dataUrl}
+            alt="Wallet QR Code"
+            className="h-56 w-56 rounded-xl border border-white/10 bg-white p-3"
+            draggable={false}
+          />
         </div>
+      )}
+
+      {/* Address */}
+      <div className="mt-3 text-center font-mono text-xs text-zinc-400 break-all">
+        {address}
       </div>
     </div>
   );
