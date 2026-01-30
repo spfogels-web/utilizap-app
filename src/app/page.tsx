@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { getSolBalance, getSplTokenBalance } from "./lib/balances";
 import { sendUsdcDevnet, isValidSolanaAddress } from "./lib/transfer";
+import QrScanButton from "./components/QrScanButton";
 
 function shortAddr(address: string) {
   return address.slice(0, 4) + "..." + address.slice(-4);
@@ -136,9 +137,6 @@ export default function Home() {
               className="h-10 w-auto select-none"
             />
             <div className="min-w-0">
-              <div className="font-extrabold tracking-tight text-lg leading-tight">
-                UTILIZAP
-              </div>
               <div className="text-xs text-zinc-400 truncate">
                 Non-custodial USDC wallet-to-wallet transfers on Solana
               </div>
@@ -166,7 +164,7 @@ export default function Home() {
 
         {/* Content grid */}
         <section className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left: Wallet + balances */}
+          {/* Left: Wallet */}
           <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5 sm:p-6">
             <div className="flex items-center justify-between gap-4">
               <h2 className="text-lg font-bold">Wallet</h2>
@@ -191,7 +189,7 @@ export default function Home() {
 
                 <button
                   onClick={() => disconnect()}
-                  className="w-full mt-3 rounded-lg bg-white/10 border border-white/10 text-white font-semibold py-2 hover:bg-white/15"
+                  className="uz-danger-btn w-full mt-3 py-2"
                 >
                   Disconnect Wallet
                 </button>
@@ -201,10 +199,6 @@ export default function Home() {
                 Connect a wallet to view balances and send USDC.
               </div>
             )}
-
-            <div className="mt-4 text-xs text-zinc-500">
-              Tip: Keep this on Devnet until you’re happy with UX + security.
-            </div>
           </div>
 
           {/* Right: Send */}
@@ -216,12 +210,21 @@ export default function Home() {
 
             <div className="mt-4">
               <label className="text-xs text-zinc-400">Recipient</label>
-              <input
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
-                placeholder="Recipient Solana address"
-                className="w-full mt-2 mb-4 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
-              />
+
+              <div className="mt-2 mb-4 flex items-center gap-3">
+                <input
+                  value={recipient}
+                  onChange={(e) => setRecipient(e.target.value)}
+                  placeholder="Recipient Solana address"
+                  className="w-full rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                />
+
+                <QrScanButton
+                  validate={(v) => isValidSolanaAddress(v.trim())}
+                  onScan={(value) => setRecipient(value.trim())}
+                  disabled={!connected}
+                />
+              </div>
 
               <label className="text-xs text-zinc-400">Amount</label>
               <input
@@ -231,35 +234,17 @@ export default function Home() {
                 className="w-full mt-2 mb-4 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
               />
 
-              {/* ✅ PREMIUM PRIMARY BUTTON */}
               <button
                 onClick={onSendUsdc}
                 disabled={!canSend || isBusy}
-                className="uz-primary-btn w-full rounded-xl py-3 font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                className="uz-primary-btn w-full rounded-xl py-3 font-semibold text-white disabled:cursor-not-allowed"
               >
                 {isBusy ? "Processing…" : "Send USDC"}
               </button>
-
-              {showTxPanel && (
-                <div className="mt-4 text-xs">
-                  {txError && <div className="text-red-400">{txError}</div>}
-                  {explorerUrl && (
-                    <a
-                      href={explorerUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-400 underline"
-                    >
-                      View transaction →
-                    </a>
-                  )}
-                </div>
-              )}
             </div>
           </div>
         </section>
 
-        {/* Footer */}
         <footer className="mt-8 text-center text-xs text-zinc-500">
           UTILIZAP • Non-custodial payments • Devnet environment
         </footer>

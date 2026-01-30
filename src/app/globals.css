@@ -27,257 +27,361 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* ================================
-   UTILIZAP — Execution Card (glass + flow)
-   ================================ */
+/* =========================================
+   UTILIZAP PRIMARY CTA (Send USDC) — GREEN
+   Matches reference: #23ff75 → #455562
+   ========================================= */
 
-.uz-execution-card {
+.uz-primary-btn{
   position: relative;
-  border-radius: 24px;
   overflow: hidden;
 
-  background: rgba(10, 10, 12, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
-    0 30px 80px rgba(0, 0, 0, 0.65);
-
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-}
-
-/* Moving “plasma” color layer (blue/purple/gold) */
-.uz-execution-card::before {
-  content: "";
-  position: absolute;
-  inset: -40%;
-  pointer-events: none;
-
-  background:
-    radial-gradient(closest-side, rgba(59, 130, 246, 0.46), transparent 62%),
-    radial-gradient(closest-side, rgba(168, 85, 247, 0.46), transparent 64%),
-    radial-gradient(closest-side, rgba(250, 204, 21, 0.34), transparent 60%),
-    linear-gradient(
-      120deg,
-      rgba(59, 130, 246, 0.22),
-      rgba(168, 85, 247, 0.20),
-      rgba(250, 204, 21, 0.12),
-      rgba(59, 130, 246, 0.22)
-    );
-
-  background-size: 60% 60%, 55% 55%, 50% 50%, 220% 220%;
-  background-position: 15% 25%, 80% 20%, 55% 85%, 0% 50%;
-
-  filter: blur(34px) saturate(1.25);
-  opacity: 0.55;
-
-  animation: uzCardFlow 16s ease-in-out infinite;
-}
-
-/* Premium highlight/shine layer */
-.uz-execution-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-
-  background:
-    radial-gradient(900px 380px at 50% -10%,
-      rgba(255, 255, 255, 0.10),
-      transparent 60%
-    ),
-    linear-gradient(to bottom,
-      rgba(255, 255, 255, 0.06),
-      transparent 35%,
-      rgba(0, 0, 0, 0.18)
-    );
-
-  opacity: 0.95;
-}
-
-/* Keep real content above animated layers */
-.uz-execution-card > * {
-  position: relative;
-  z-index: 1;
-}
-
-@keyframes uzCardFlow {
-  0% {
-    transform: translate3d(-2%, -1%, 0) rotate(0deg);
-    background-position: 15% 25%, 80% 20%, 55% 85%, 0% 50%;
-  }
-  50% {
-    transform: translate3d(2%, 1%, 0) rotate(10deg);
-    background-position: 25% 35%, 70% 30%, 45% 75%, 100% 50%;
-  }
-  100% {
-    transform: translate3d(-2%, -1%, 0) rotate(0deg);
-    background-position: 15% 25%, 80% 20%, 55% 85%, 0% 50%;
-  }
-}
-
-/* ================================
-   UTILIZAP — Wallet Button (WalletMultiButton)
-   ================================ */
-
-.uz-wallet-btn {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-
-  padding: 10px 16px !important;
-  border-radius: 14px !important;
-
+  /* Bright premium gradient (your reference) */
   background: linear-gradient(
     135deg,
-    rgba(var(--uz-blue), 0.22),
-    rgba(var(--uz-purple), 0.18),
-    rgba(var(--uz-gold), 0.10)
-  ) !important;
+    #23ff75 0%,
+    #2fe48a 38%,
+    #455562 100%
+  );
 
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  color: rgba(255, 255, 255, 0.92) !important;
-  font-weight: 600 !important;
-
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
-    0 12px 30px rgba(0, 0, 0, 0.45),
-    0 0 26px rgba(var(--uz-blue), 0.18) !important;
-
-  transition:
-    transform 180ms ease,
-    box-shadow 180ms ease,
-    background 180ms ease !important;
-}
-
-/* Force wallet-adapter base class to obey our theme */
-.wallet-adapter-button.uz-wallet-btn {
-  background: linear-gradient(
-    135deg,
-    rgba(var(--uz-blue), 0.22),
-    rgba(var(--uz-purple), 0.18),
-    rgba(var(--uz-gold), 0.10)
-  ) !important;
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-}
-
-.uz-wallet-btn:hover {
-  transform: translateY(-1px) scale(1.01) !important;
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.10) inset,
-    0 16px 40px rgba(0, 0, 0, 0.55),
-    0 0 34px rgba(var(--uz-purple), 0.25) !important;
-}
-
-.uz-wallet-btn:active {
-  transform: translateY(0) scale(0.985) !important;
-}
-
-/* Icon spacing */
-.uz-wallet-btn .wallet-adapter-button-start-icon {
-  margin-right: 10px !important;
-}
-
-/* Optional: pulse ONLY when disconnected */
-.wallet-adapter-button.uz-wallet-btn:not(.wallet-adapter-button-connected) {
-  animation: uzPulse 2.4s ease-in-out infinite;
-}
-
-@keyframes uzPulse {
-  0%, 100% {
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.06) inset,
-      0 12px 30px rgba(0, 0, 0, 0.45),
-      0 0 22px rgba(var(--uz-blue), 0.18);
-  }
-  50% {
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.10) inset,
-      0 18px 42px rgba(0, 0, 0, 0.55),
-      0 0 36px rgba(var(--uz-purple), 0.35);
-  }
-}
-
-/* ================================
-   UTILIZAP — Primary CTA Button
-   (Send USDC) — NO PAGE JUMP
-   Motion stays inside the button only
-   ================================ */
-
-.uz-primary-btn {
-  position: relative;
-  isolation: isolate;
+  border: 1px solid rgba(35, 255, 117, 0.45);
   border-radius: 14px;
 
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  /* readable on bright green */
+  color: #07160f;
+  font-weight: 800;
+  letter-spacing: .2px;
 
-  /* Animated gradient lives here */
+  box-shadow:
+    0 12px 34px rgba(35, 255, 117, 0.35),
+    inset 0 1px 0 rgba(255,255,255,.35);
+
+  transition:
+    transform .15s ease,
+    box-shadow .15s ease,
+    filter .15s ease;
+}
+
+/* Hover — brighter + lift */
+.uz-primary-btn:hover{
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  box-shadow:
+    0 18px 48px rgba(35, 255, 117, 0.55),
+    inset 0 1px 0 rgba(255,255,255,.45);
+}
+
+/* Active */
+.uz-primary-btn:active{
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+/* Disabled — keep gradient visible (override tailwind disabled opacity) */
+.uz-primary-btn:disabled{
+  opacity: 1 !important; /* IMPORTANT: beats disabled:opacity-50 */
   background: linear-gradient(
     135deg,
-    rgba(var(--uz-blue), 0.95),
-    rgba(var(--uz-purple), 0.92),
-    rgba(var(--uz-gold), 0.55),
-    rgba(var(--uz-blue), 0.95)
+    rgba(35,255,117,.35),
+    rgba(69,85,98,.40)
   );
-  background-size: 220% 220%;
-  animation: uzBtnFlow 5.5s ease-in-out infinite;
-
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
-    0 18px 50px rgba(0, 0, 0, 0.55),
-    0 0 38px rgba(var(--uz-purple), 0.22);
-
-  /* IMPORTANT: no transform = no layout jump */
-  transition: box-shadow 180ms ease, filter 180ms ease;
+  color: rgba(255,255,255,.70);
+  border-color: rgba(255,255,255,.12);
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
-@keyframes uzBtnFlow {
-  0%   { background-position: 0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-/* Soft glow ring (static, no movement) */
-.uz-primary-btn::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
+/* Subtle shimmer sweep */
+.uz-primary-btn::before{
+  content:"";
+  position:absolute;
+  inset:-2px;
   background: linear-gradient(
     90deg,
-    rgba(var(--uz-blue), 0.0),
-    rgba(255, 255, 255, 0.28),
-    rgba(var(--uz-purple), 0.0)
+    transparent,
+    rgba(255,255,255,.45),
+    transparent
   );
-  filter: blur(10px);
-  opacity: 0.35;
-  z-index: -1;
+  transform: translateX(-120%);
+  transition: transform .7s ease;
+  pointer-events:none;
 }
 
-/* Remove shimmer sweep completely (it can feel like page movement) */
-.uz-primary-btn::after {
-  display: none;
+.uz-primary-btn:hover::before{
+  transform: translateX(120%);
 }
 
-.uz-primary-btn:hover:not(:disabled) {
-  filter: saturate(1.10);
+/* =========================================
+   UZ QR SCANNER BUTTON (Premium Blue)
+   ========================================= */
+
+.uz-qr-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:.5rem;
+  padding:.6rem .9rem;
+  border-radius: 999px;
+
+  background: linear-gradient(
+    135deg,
+    rgba(70,120,255,.95),
+    rgba(120,160,255,.95)
+  );
+
+  border: 1px solid rgba(120,160,255,.55);
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.10) inset,
-    0 22px 70px rgba(0, 0, 0, 0.60),
-    0 0 52px rgba(var(--uz-blue), 0.26);
+    0 6px 20px rgba(70,120,255,.35),
+    inset 0 0 0 1px rgba(255,255,255,.12);
+
+  color: #ffffff;
+  font-weight: 700;
+  font-size: .85rem;
+
+  transition:
+    transform .15s ease,
+    box-shadow .15s ease,
+    filter .15s ease;
 }
 
-.uz-primary-btn:active:not(:disabled) {
-  /* no transform — just a subtle “press” via brightness */
-  filter: saturate(1.05) brightness(0.98);
+.uz-qr-btn:hover{
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow:
+    0 10px 30px rgba(70,120,255,.45),
+    inset 0 0 0 1px rgba(255,255,255,.18);
 }
 
-/* Disabled state */
-.uz-primary-btn:disabled {
-  animation: none;
-  background: rgba(255, 255, 255, 0.10);
-  color: rgba(255, 255, 255, 0.55);
-  border-color: rgba(255, 255, 255, 0.10);
-  box-shadow: none;
+.uz-qr-btn:active{
+  transform: translateY(0);
+}
+
+.uz-qr-btn:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+  transform:none;
+  box-shadow:none;
+}
+
+.uz-qr-icon{
+  width:16px;
+  height:16px;
+  stroke: white;
+  opacity:.95;
+}
+
+.uz-qr-text{
+  font-size:.92rem;
+  opacity:.95;
+}
+
+/* =========================================
+   UZ QR MODAL
+   ========================================= */
+
+.uz-qr-modal{
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+}
+
+.uz-qr-backdrop{
+  position:absolute;
+  inset:0;
+  background: rgba(0,0,0,.55);
+}
+
+/* Sheet */
+
+.uz-qr-sheet{
+  position:relative;
+  width:min(560px, 94vw);
+  margin: 0 0 14px 0;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(10,14,26,.66);
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  overflow:hidden;
+}
+
+/* Header */
+
+.uz-qr-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 14px 14px 10px 14px;
+}
+
+.uz-qr-title{
+  font-weight:700;
+  letter-spacing:.2px;
+  color: rgba(255,255,255,.92);
+}
+
+.uz-qr-close{
+  width:36px;
+  height:36px;
+  border-radius: 12px;
+  border:1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: rgba(255,255,255,.9);
+  transition: transform .15s ease, background .15s ease;
+}
+
+.uz-qr-close:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,.09);
+}
+
+/* Camera */
+
+.uz-qr-video-wrap{
+  position:relative;
+  padding: 0 14px 14px 14px;
+}
+
+.uz-qr-video{
+  width:100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 16px;
+  object-fit: cover;
+  background: rgba(0,0,0,.25);
+  border:1px solid rgba(255,255,255,.12);
+}
+
+.uz-qr-frame{
+  pointer-events:none;
+  position:absolute;
+  left:14px;
+  right:14px;
+  top:0;
+  bottom:14px;
+  border-radius: 16px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.10),
+    inset 0 0 0 999px rgba(0,0,0,.10);
+}
+
+/* Actions */
+
+.uz-qr-actions{
+  display:flex;
+  gap:10px;
+  padding: 0 14px 12px 14px;
+}
+
+.uz-qr-action{
+  flex:1;
+  padding: .7rem .9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: rgba(255,255,255,.92);
+  transition: transform .15s ease, background .15s ease, border-color .15s ease;
+}
+
+.uz-qr-action:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,.09);
+  border-color: rgba(255,255,255,.20);
+}
+
+.uz-qr-action:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+  transform:none;
+}
+
+.uz-qr-action-primary{
+  border-color: rgba(120,160,255,.30);
+  background: linear-gradient(
+    90deg,
+    rgba(90,120,255,.18),
+    rgba(190,120,255,.18),
+    rgba(255,210,90,.14)
+  );
+}
+
+/* Messaging */
+
+.uz-qr-error{
+  padding: 0 14px 10px 14px;
+  color: rgba(255,140,140,.95);
+  font-size: .92rem;
+}
+
+.uz-qr-tip{
+  padding: 0 14px 14px 14px;
+  color: rgba(255,255,255,.68);
+  font-size: .9rem;
+}
+
+/* ========= UTILIZAP DESTRUCTIVE CTA (Disconnect Wallet) ========= */
+.uz-danger-btn{
+  position: relative;
+  overflow: hidden;
+
+  background: linear-gradient(
+    135deg,
+    #ff4d4d 0%,
+    #e63b3b 45%,
+    #7a1f1f 100%
+  );
+
+  border: 1px solid rgba(255, 77, 77, 0.45);
+  border-radius: 12px;
+
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: .2px;
+
+  box-shadow:
+    0 10px 30px rgba(255, 77, 77, 0.35),
+    inset 0 1px 0 rgba(255,255,255,.25);
+
+  transition:
+    transform .15s ease,
+    box-shadow .15s ease,
+    filter .15s ease;
+}
+
+/* Hover */
+.uz-danger-btn:hover{
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow:
+    0 16px 44px rgba(255, 77, 77, 0.45),
+    inset 0 1px 0 rgba(255,255,255,.35);
+}
+
+/* Active */
+.uz-danger-btn:active{
+  transform: translateY(0);
+  filter: brightness(0.97);
+}
+
+/* Optional subtle shimmer */
+.uz-danger-btn::before{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255,255,255,.35),
+    transparent
+  );
+  transform: translateX(-120%);
+  transition: transform .6s ease;
+  pointer-events:none;
+}
+
+.uz-danger-btn:hover::before{
+  transform: translateX(120%);
 }
