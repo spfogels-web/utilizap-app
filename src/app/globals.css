@@ -27,39 +27,36 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* =========================================
-   UTILIZAP PRIMARY CTA (Send USDC) — GREEN
-   Matches reference: #23ff75 → #455562
-   ========================================= */
-
+/* ========= UTILIZAP PRIMARY CTA (Send USDC) ========= */
 .uz-primary-btn{
   position: relative;
   overflow: hidden;
 
-  /* Bright premium gradient (your reference) */
   background: linear-gradient(
     135deg,
-    #23ff75 0%,
-    #2fe48a 38%,
-    #455562 100%
-  );
+    #0ADD08 0%,
+    #2BFF3B 45%,
+    #6CFF88 100%
+  ) !important;
 
-  border: 1px solid rgba(35, 255, 117, 0.45);
+  border: 1px solid rgba(10, 221, 8, 0.55);
   border-radius: 14px;
 
-  /* readable on bright green */
-  color: #07160f;
+  color: #08140c !important;
   font-weight: 800;
   letter-spacing: .2px;
 
   box-shadow:
-    0 12px 34px rgba(35, 255, 117, 0.35),
-    inset 0 1px 0 rgba(255,255,255,.35);
+    0 12px 34px rgba(10, 221, 8, 0.45),
+    inset 0 1px 0 rgba(255,255,255,.45);
 
   transition:
     transform .15s ease,
     box-shadow .15s ease,
     filter .15s ease;
+
+    .uz-primary-btn { background: hotpink !important; }
+
 }
 
 /* Hover — brighter + lift */
@@ -67,25 +64,24 @@ body {
   transform: translateY(-1px);
   filter: brightness(1.08);
   box-shadow:
-    0 18px 48px rgba(35, 255, 117, 0.55),
-    inset 0 1px 0 rgba(255,255,255,.45);
+    0 18px 48px rgba(10, 221, 8, 0.65),
+    inset 0 1px 0 rgba(255,255,255,.55);
 }
 
 /* Active */
 .uz-primary-btn:active{
   transform: translateY(0);
-  filter: brightness(0.98);
+  filter: brightness(0.97);
 }
 
-/* Disabled — keep gradient visible (override tailwind disabled opacity) */
+/* Disabled */
 .uz-primary-btn:disabled{
-  opacity: 1 !important; /* IMPORTANT: beats disabled:opacity-50 */
   background: linear-gradient(
     135deg,
-    rgba(35,255,117,.35),
-    rgba(69,85,98,.40)
+    rgba(10,221,8,.25),
+    rgba(75,127,90,.35)
   );
-  color: rgba(255,255,255,.70);
+  color: rgba(255,255,255,.6);
   border-color: rgba(255,255,255,.12);
   box-shadow: none;
   cursor: not-allowed;
@@ -99,7 +95,7 @@ body {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255,255,255,.45),
+    rgba(255,255,255,.55),
     transparent
   );
   transform: translateX(-120%);
@@ -110,6 +106,7 @@ body {
 .uz-primary-btn:hover::before{
   transform: translateX(120%);
 }
+
 
 /* =========================================
    UZ QR SCANNER BUTTON (Premium Blue)

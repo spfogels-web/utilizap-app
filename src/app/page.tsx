@@ -7,7 +7,9 @@ import { useEffect, useMemo, useState } from "react";
 
 import { getSolBalance, getSplTokenBalance } from "./lib/balances";
 import { sendUsdcDevnet, isValidSolanaAddress } from "./lib/transfer";
+
 import QrScanButton from "./components/QrScanButton";
+import ReceiveQr from "./components/ReceiveQr";
 
 function shortAddr(address: string) {
   return address.slice(0, 4) + "..." + address.slice(-4);
@@ -187,9 +189,12 @@ export default function Home() {
 
                 <p className="text-xs text-zinc-500">Devnet (safe testing)</p>
 
+                {/* ✅ RECEIVE QR (shows your wallet QR) */}
+                <ReceiveQr className="mt-4" />
+
                 <button
                   onClick={() => disconnect()}
-                  className="uz-danger-btn w-full mt-3 py-2"
+                  className="uz-danger-btn w-full mt-4 py-2"
                 >
                   Disconnect Wallet
                 </button>
@@ -219,11 +224,22 @@ export default function Home() {
                   className="w-full rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
                 />
 
-                <QrScanButton
-                  validate={(v) => isValidSolanaAddress(v.trim())}
-                  onScan={(value) => setRecipient(value.trim())}
-                  disabled={!connected}
-                />
+                {mounted ? (
+  <QrScanButton
+    validate={(v) => isValidSolanaAddress(v.trim())}
+    onScan={(value) => setRecipient(value.trim())}
+    disabled={!connected}
+  />
+) : (
+  <button
+    type="button"
+    className="uz-qr-btn opacity-60 cursor-not-allowed"
+    disabled
+  >
+    <span className="uz-qr-text">Scan</span>
+  </button>
+)}
+
               </div>
 
               <label className="text-xs text-zinc-400">Amount</label>
@@ -235,12 +251,29 @@ export default function Home() {
               />
 
               <button
-                onClick={onSendUsdc}
-                disabled={!canSend || isBusy}
-                className="uz-primary-btn w-full rounded-xl py-3 font-semibold text-white disabled:cursor-not-allowed"
-              >
-                {isBusy ? "Processing…" : "Send USDC"}
-              </button>
+  onClick={onSendUsdc}
+  disabled={!canSend || isBusy}
+  className="uz-primary-btn w-full py-3 disabled:cursor-not-allowed"
+>
+  {isBusy ? "Processing…" : "Send USDC"}
+</button>
+
+
+              {showTxPanel && (
+                <div className="mt-4 text-xs">
+                  {txError && <div className="text-red-400">{txError}</div>}
+                  {explorerUrl && (
+                    <a
+                      href={explorerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-400 underline"
+                    >
+                      View transaction →
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </section>
