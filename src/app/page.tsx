@@ -23,6 +23,14 @@ type TxStage =
   | "confirmed"
   | "failed";
 
+// Premium currency formatting (USDC as "cash")
+const formatUsd = (n: number) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(n);
+
 export default function Home() {
   const { connection } = useConnection();
   const { publicKey, connected, signTransaction, disconnect } = useWallet();
@@ -120,14 +128,19 @@ export default function Home() {
 
   const isConfirmed = txStage === "confirmed";
 
-  // Premium number formatting
+  // Keep your existing "display" strings for other places if needed
   const solDisplay =
-    solBalance === null ? "—" : solBalance < 1 ? solBalance.toFixed(4) : solBalance.toFixed(2);
-
-  const usdcDisplay =
-    usdcBalance === null
+    solBalance === null
       ? "—"
-      : usdcBalance.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      : solBalance < 1
+      ? solBalance.toFixed(4)
+      : solBalance.toFixed(2);
+
+  // USDC "cash" display (big)
+  const usdcCash = usdcBalance === null ? "—" : formatUsd(usdcBalance);
+
+  // SOL precise display (small)
+  const solPrecise = solBalance === null ? "—" : solBalance.toFixed(4);
 
   return (
     <main className="min-h-screen text-white bg-black relative">
@@ -184,40 +197,87 @@ export default function Home() {
             <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5 sm:p-6">
               <div className="flex items-center justify-between gap-4">
                 <h2 className="text-lg font-bold">Wallet</h2>
-                <span className="text-xs text-zinc-400">Secure • Non-custodial</span>
+                <span className="text-xs text-zinc-400">
+                  Secure • Non-custodial
+                </span>
               </div>
 
-              <div className="mt-4 rounded-xl border border-white/10 bg-black/40 p-4 text-center space-y-3">
-                <div className="space-y-1">
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/40 p-4 space-y-4">
+                {/* Connected Wallet */}
+                <div className="text-center space-y-1">
                   <p className="text-sm text-zinc-400">Connected Wallet</p>
-                  <p className="font-mono text-lg">{shortAddr(publicKey.toBase58())}</p>
+                  <p className="font-mono text-lg">
+                    {shortAddr(publicKey.toBase58())}
+                  </p>
                 </div>
 
-                <div className="mt-1 flex items-center justify-center gap-3 flex-wrap">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 min-w-[150px]">
-                    <div className="text-[11px] uppercase tracking-wider text-zinc-400">SOL</div>
-                    <div className="mt-1 text-2xl font-extrabold tracking-tight text-white">
-                      {solDisplay}
+                {/* Balance section (USDC first / SOL secondary) */}
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
+                  {/* Available (USDC) */}
+                  <div className="px-4 py-4 border-b border-white/10">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wider text-zinc-400">
+                          Available Balance
+                        </p>
+                        <p className="mt-1 text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
+                          {usdcCash}{" "}
+                          <span className="text-white/60 text-base sm:text-lg font-semibold">
+                            USDC
+                          </span>
+                        </p>
+                        <p className="mt-1 text-sm text-zinc-500">
+                          Ready to send
+                        </p>
+                      </div>
+
+                      <div
+                        className="h-10 w-10 rounded-xl border border-white/10"
+                        style={{
+                          background:
+                            "linear-gradient(135deg, rgba(124,58,237,.35), rgba(99,102,241,.25))",
+                        }}
+                        aria-hidden="true"
+                      />
+                    </div>
+
+                    <div className="mt-2 text-[11px] text-zinc-500">
+                      USDC (devnet)
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 min-w-[170px]">
-                    <div className="text-[11px] uppercase tracking-wider text-zinc-400">
-                      USDC{" "}
-                      <span className="ml-2 text-[10px] text-zinc-500">(devnet)</span>
-                    </div>
-                    <div className="mt-1 text-2xl font-extrabold tracking-tight text-white">
-                      {usdcDisplay}
+                  {/* Network (SOL) */}
+                  <div className="px-4 py-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wider text-zinc-400">
+                          Network Balance
+                        </p>
+                        <p className="mt-1 text-lg font-bold text-white">
+                          {solPrecise}{" "}
+                          <span className="text-white/60 font-semibold">
+                            SOL
+                          </span>
+                        </p>
+                        <p className="mt-1 text-sm text-zinc-500">
+                          Used for network fees
+                        </p>
+                      </div>
+
+                      <span className="text-xs px-3 py-1 rounded-full border border-white/10 bg-black/40 text-zinc-300">
+                        Devnet
+                      </span>
                     </div>
                   </div>
                 </div>
-
-                <p className="text-xs text-zinc-500">Devnet (safe testing)</p>
 
                 {/* RECEIVE QR */}
-                <ReceiveQr className="mt-2" />
+                <ReceiveQr className="mt-1" />
 
-                <button onClick={() => disconnect()} className="uz-danger-btn w-full mt-3 py-2">
+                <button
+                  onClick={() => disconnect()}
+                  className="uz-danger-btn w-full mt-1 py-2"
+                >
                   Disconnect Wallet
                 </button>
               </div>
@@ -233,6 +293,17 @@ export default function Home() {
               <div className="mt-4">
                 <label className="text-xs text-zinc-400">Recipient</label>
 
+                {/* ✅ Scanner panel lives HERE (above the row) so it never pushes left */}
+                {mounted ? (
+                  <QrScanButton
+                    mode="panel"
+                    validate={(v) => isValidSolanaAddress(v.trim())}
+                    onScan={(value) => setRecipient(value.trim())}
+                    disabled={!connected || isBusy}
+                  />
+                ) : null}
+
+                {/* Input row ALWAYS stays below */}
                 <div className="mt-2 mb-4 flex items-center gap-3">
                   <input
                     value={recipient}
@@ -248,6 +319,7 @@ export default function Home() {
 
                   {mounted ? (
                     <QrScanButton
+                      mode="button"
                       validate={(v) => isValidSolanaAddress(v.trim())}
                       onScan={(value) => setRecipient(value.trim())}
                       disabled={!connected || isBusy}
@@ -291,11 +363,15 @@ export default function Home() {
                 </button>
 
                 {txStage === "signing" && (
-                  <div className="mt-2 text-xs text-zinc-400">Approve in Phantom…</div>
+                  <div className="mt-2 text-xs text-zinc-400">
+                    Approve in Phantom…
+                  </div>
                 )}
 
                 {txStage === "confirming" && (
-                  <div className="mt-2 text-xs text-zinc-400">Confirming on Solana…</div>
+                  <div className="mt-2 text-xs text-zinc-400">
+                    Confirming on Solana…
+                  </div>
                 )}
 
                 {showTxPanel && (
@@ -322,13 +398,13 @@ export default function Home() {
             <div className="text-xs text-zinc-400">UTILIZAP • Devnet Preview</div>
 
             <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight">
-              Non-custodial USDC payments,
-              <span className="block text-zinc-200">Venmo-style on Solana.</span>
+              Venmo-style USDC payments,
+              <span className="block text-zinc-200">Non-custodial. Instant.</span>
             </h1>
 
             <p className="mt-4 max-w-2xl mx-auto text-sm sm:text-base text-zinc-300">
-              Connect your wallet to access the UTILIZAP dashboard and send USDC with QR and
-              on-chain confirmation.
+              Connect your wallet to access the UTILIZAP dashboard and send USDC
+              with QR and on-chain confirmation.
             </p>
 
             <div className="mt-6 flex justify-center">

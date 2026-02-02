@@ -1,15 +1,13 @@
+// src/app/lib/balances.ts
 import { Connection, PublicKey } from "@solana/web3.js";
-
-// ✅ Correct Devnet USDC mint (you confirmed this)
-const DEVNET_USDC_MINT = new PublicKey(
-  "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
-);
+import { getAssociatedTokenAddress } from "@solana/spl-token";
+import { DEVNET_USDC_MINT } from "@/app/lib/constants";
 
 export async function getSolBalance(
   connection: Connection,
   owner: PublicKey
 ): Promise<number> {
-  const lamports = await connection.getBalance(owner);
+  const lamports = await connection.getBalance(owner, "confirmed");
   return lamports / 1_000_000_000;
 }
 
@@ -17,12 +15,15 @@ export async function getSplTokenBalance(
   connection: Connection,
   owner: PublicKey
 ): Promise<number> {
-  const res = await connection.getParsedTokenAccountsByOwner(owner, {
-    mint: DEVNET_USDC_MINT,
-  });
+  // ✅ This MUST match your transfer mint
+  const ata = await getAssociatedTokenAddress(DEVNET_USDC_MINT, owner);
 
-  return res.value.reduce((total, item) => {
-    const amount = item.account.data.parsed.info.tokenAmount.uiAmount ?? 0;
-    return total + amount;
-  }, 0);
+  // If ATA doesn't exist, balance is 0
+  const info = await connection.getAccountInfo(ata, "confirmed");
+  if (!info) return 0;
+
+  // Fetch token amount
+  const bal = await connection.getTokenAccountBalance(ata, "confirmed");
+  const uiStr = bal?.value?.uiAmountString ?? "0";
+  return Number(uiStr);
 }

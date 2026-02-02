@@ -6,46 +6,71 @@ type Props = {
   onScan: (value: string) => void;
   validate?: (value: string) => boolean;
   disabled?: boolean;
+
+  /** "button" renders the scan button, "panel" renders the scanner panel (when open) */
+  mode?: "button" | "panel";
 };
 
-export default function QrScanButton({ onScan, validate, disabled }: Props) {
+const CHANNEL = "uz:qr:toggle";
+
+function emitToggle(open: boolean) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(CHANNEL, { detail: { open } }));
+}
+
+export default function QrScanButton({
+  onScan,
+  validate,
+  disabled,
+  mode = "button",
+}: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scannerRef = useRef<any>(null);
 
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [torchOn, setTorchOn] = useState(false);
-  const [hasTorch, setHasTorch] = useState(false);
 
   const canUse = useMemo(() => typeof window !== "undefined", []);
 
+  // Sync open/close between the "button" instance and the "panel" instance
   useEffect(() => {
+    if (!canUse) return;
+
+    const handler = (e: any) => {
+      const next = !!e?.detail?.open;
+      setErr(null);
+      setOpen(next);
+    };
+
+    window.addEventListener(CHANNEL, handler as any);
+    return () => window.removeEventListener(CHANNEL, handler as any);
+  }, [canUse]);
+
+  const stopScanner = async () => {
+    try {
+      const s = scannerRef.current;
+      if (s) {
+        await s.stop();
+        await s.destroy();
+        scannerRef.current = null;
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    // Only the panel instance should start camera/scanner
+    if (mode !== "panel") return;
     if (!open) return;
 
     let alive = true;
 
-    const stopScanner = async () => {
-      try {
-        const s = scannerRef.current;
-        if (s) {
-          await s.stop();
-          await s.destroy();
-          scannerRef.current = null;
-        }
-      } catch {
-        // ignore
-      }
-    };
-
     const start = async () => {
       setErr(null);
-      setTorchOn(false);
-      setHasTorch(false);
 
       try {
         const QrScanner = (await import("qr-scanner")).default;
-
-        if (!alive) return;
 
         const videoEl = videoRef.current;
         if (!videoEl) throw new Error("Camera not ready.");
@@ -63,7 +88,7 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
             }
 
             await stopScanner();
-            setOpen(false);
+            emitToggle(false);
             onScan(value);
           },
           {
@@ -78,11 +103,8 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
 
         await scanner.start();
 
-        try {
-          const torch = await scanner.hasFlash();
-          setHasTorch(!!torch);
-        } catch {
-          setHasTorch(false);
+        if (!alive) {
+          await stopScanner();
         }
       } catch (e: any) {
         setErr(e?.message || "Camera could not start. Check permissions.");
@@ -96,46 +118,21 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
       stopScanner();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const stopScanner = async () => {
-    try {
-      const s = scannerRef.current;
-      if (s) {
-        await s.stop();
-        await s.destroy();
-        scannerRef.current = null;
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const toggleTorch = async () => {
-    try {
-      const s = scannerRef.current;
-      if (!s) return;
-      const next = !torchOn;
-      await s.toggleFlash();
-      setTorchOn(next);
-    } catch {
-      setErr("Torch not available on this device.");
-    }
-  };
+  }, [open, mode]);
 
   if (!canUse) return null;
 
-  return (
-    <>
+  // ✅ BUTTON MODE (small Scan button)
+  if (mode === "button") {
+    return (
       <button
         type="button"
         className="uz-qr-btn"
         disabled={disabled}
-        aria-disabled={disabled ? true : undefined}
         onClick={() => {
           if (disabled) return;
           setErr(null);
-          setOpen(true);
+          emitToggle(true);
         }}
         aria-label="Scan QR"
         title="Scan QR"
@@ -155,70 +152,69 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
           <rect x="14" y="14" width="7" height="7" />
           <rect x="3" y="14" width="7" height="7" />
         </svg>
-
         <span className="uz-qr-text">Scan</span>
       </button>
+    );
+  }
 
-      {open && (
-        <div className="uz-qr-modal" role="dialog" aria-modal="true">
-          <div
-            className="uz-qr-backdrop"
+  // ✅ PANEL MODE (centered, big, square) — only renders when open
+  if (!open) return null;
+
+  return (
+    <div className="mt-3 mb-4 w-full flex justify-center">
+      <div className="relative w-full max-w-[440px] aspect-square rounded-2xl border border-white/10 bg-black/60 overflow-hidden">
+        {/* Header */}
+        <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between">
+          <div className="text-xs text-white/80">Scan recipient QR</div>
+          <button
+            type="button"
             onClick={async () => {
               await stopScanner();
-              setOpen(false);
+              emitToggle(false);
             }}
-          />
-          <div className="uz-qr-sheet">
-            <div className="uz-qr-head">
-              <div className="uz-qr-title">Scan recipient QR</div>
-              <button
-                type="button"
-                className="uz-qr-close"
-                onClick={async () => {
-                  await stopScanner();
-                  setOpen(false);
-                }}
-                aria-label="Close scanner"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="uz-qr-video-wrap">
-              <video ref={videoRef} className="uz-qr-video" muted playsInline />
-              <div className="uz-qr-frame" aria-hidden="true" />
-            </div>
-
-            <div className="uz-qr-actions">
-              <button
-                type="button"
-                className="uz-qr-action"
-                onClick={async () => {
-                  await stopScanner();
-                  setOpen(false);
-                }}
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                className="uz-qr-action uz-qr-action-primary"
-                onClick={toggleTorch}
-                disabled={!hasTorch}
-                title={!hasTorch ? "Torch not supported" : "Toggle torch"}
-              >
-                {torchOn ? "Torch: On" : "Torch: Off"}
-              </button>
-            </div>
-
-            {err && <div className="uz-qr-error">{err}</div>}
-            <div className="uz-qr-tip">
-              Tip: Use QR codes that contain a plain Solana address.
-            </div>
-          </div>
+            className="h-8 w-8 rounded-full border border-white/10 bg-black/50 text-white/80 hover:text-white"
+            aria-label="Close scanner"
+            title="Close"
+          >
+            ✕
+          </button>
         </div>
-      )}
-    </>
+
+        {/* Video */}
+        <video
+          ref={videoRef}
+          className="absolute inset-0 h-full w-full object-cover"
+          muted
+          playsInline
+        />
+
+        {/* Subtle frame overlay */}
+        <div
+          className="absolute inset-0"
+          aria-hidden="true"
+          style={{
+            boxShadow: "inset 0 0 0 2px rgba(255,255,255,.06)",
+          }}
+        />
+        <div
+          className="absolute inset-0 pointer-events-none"
+          aria-hidden="true"
+          style={{
+            background:
+              "radial-gradient(closest-side, transparent 62%, rgba(0,0,0,.35) 100%)",
+          }}
+        />
+
+        {/* Error + tip */}
+        {err && (
+          <div className="absolute left-3 right-3 bottom-10 z-10 text-[11px] text-red-300">
+            {err}
+          </div>
+        )}
+        <div className="absolute left-3 right-3 bottom-3 z-10 text-[11px] text-white/70">
+          Tip: Use QR codes that contain a plain Solana address.
+        </div>
+      </div>
+    </div>
   );
 }
