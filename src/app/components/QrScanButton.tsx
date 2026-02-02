@@ -24,6 +24,19 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
 
     let alive = true;
 
+    const stopScanner = async () => {
+      try {
+        const s = scannerRef.current;
+        if (s) {
+          await s.stop();
+          await s.destroy();
+          scannerRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+    };
+
     const start = async () => {
       setErr(null);
       setTorchOn(false);
@@ -32,30 +45,24 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
       try {
         const QrScanner = (await import("qr-scanner")).default;
 
-        // Optional: if you ever choose to host the worker yourself
-        // QrScanner.WORKER_PATH = "/qr-scanner-worker.min.js";
-
         if (!alive) return;
 
         const videoEl = videoRef.current;
         if (!videoEl) throw new Error("Camera not ready.");
 
-        // Create scanner
         const scanner = new QrScanner(
           videoEl,
-          (result: any) => {
+          async (result: any) => {
             const raw = typeof result === "string" ? result : result?.data;
             const value = (raw || "").trim();
             if (!value) return;
 
-            // If validate provided, enforce it
             if (validate && !validate(value)) {
               setErr("That QR doesn’t look like a valid Solana address.");
               return;
             }
 
-            // Success: stop + close, then hand value back to page.tsx
-            stopScanner();
+            await stopScanner();
             setOpen(false);
             onScan(value);
           },
@@ -71,7 +78,6 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
 
         await scanner.start();
 
-        // Torch support (if available)
         try {
           const torch = await scanner.hasFlash();
           setHasTorch(!!torch);
@@ -82,22 +88,6 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
         setErr(e?.message || "Camera could not start. Check permissions.");
       }
     };
-
-    const stopScanner = async () => {
-      try {
-        const s = scannerRef.current;
-        if (s) {
-          await s.stop();
-          await s.destroy();
-          scannerRef.current = null;
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    // expose stop to inner callback
-    (QrScanButton as any)._stopScanner = stopScanner;
 
     start();
 
@@ -110,8 +100,12 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
 
   const stopScanner = async () => {
     try {
-      const fn = (QrScanButton as any)._stopScanner;
-      if (fn) await fn();
+      const s = scannerRef.current;
+      if (s) {
+        await s.stop();
+        await s.destroy();
+        scannerRef.current = null;
+      }
     } catch {
       // ignore
     }
@@ -137,28 +131,30 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
         type="button"
         className="uz-qr-btn"
         disabled={disabled}
+        aria-disabled={disabled ? true : undefined}
         onClick={() => {
+          if (disabled) return;
           setErr(null);
           setOpen(true);
         }}
         aria-label="Scan QR"
         title="Scan QR"
       >
-       <svg
-  className="uz-qr-icon"
-  viewBox="0 0 24 24"
-  fill="none"
-  stroke="currentColor"
-  strokeWidth="2"
-  strokeLinecap="round"
-  strokeLinejoin="round"
-  aria-hidden="true"
->
-  <rect x="3" y="3" width="7" height="7" />
-  <rect x="14" y="3" width="7" height="7" />
-  <rect x="14" y="14" width="7" height="7" />
-  <rect x="3" y="14" width="7" height="7" />
-</svg>
+        <svg
+          className="uz-qr-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="3" width="7" height="7" />
+          <rect x="14" y="3" width="7" height="7" />
+          <rect x="14" y="14" width="7" height="7" />
+          <rect x="3" y="14" width="7" height="7" />
+        </svg>
 
         <span className="uz-qr-text">Scan</span>
       </button>
@@ -189,12 +185,7 @@ export default function QrScanButton({ onScan, validate, disabled }: Props) {
             </div>
 
             <div className="uz-qr-video-wrap">
-              <video
-                ref={videoRef}
-                className="uz-qr-video"
-                muted
-                playsInline
-              />
+              <video ref={videoRef} className="uz-qr-video" muted playsInline />
               <div className="uz-qr-frame" aria-hidden="true" />
             </div>
 

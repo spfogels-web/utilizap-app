@@ -7,7 +7,6 @@ import {
   PhantomWalletAdapter,
   SolflareWalletAdapter,
   CoinbaseWalletAdapter,
-  CloverWalletAdapter,
 } from "@solana/wallet-adapter-wallets";
 import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
 import { clusterApiUrl } from "@solana/web3.js";
@@ -23,7 +22,6 @@ export default function Providers({ children }: { children: ReactNode }) {
       new PhantomWalletAdapter(),
       new SolflareWalletAdapter({ network }),
       new CoinbaseWalletAdapter({ appName: "UTILIZAP" }),
-      new CloverWalletAdapter(),
     ],
     [network]
   );

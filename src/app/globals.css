@@ -27,16 +27,19 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* ========= UTILIZAP PRIMARY CTA (Send USDC) ========= */
-.uz-primary-btn{
+/* ================================
+   UTILIZAP PRIMARY CTA (Send USDC)
+   ================================ */
+
+.uz-primary-btn {
   position: relative;
   overflow: hidden;
 
   background: linear-gradient(
     135deg,
-    #0ADD08 0%,
-    #2BFF3B 45%,
-    #6CFF88 100%
+    #0add08 0%,
+    #2bff3b 45%,
+    #6cff88 100%
   ) !important;
 
   border: 1px solid rgba(10, 221, 8, 0.55);
@@ -44,79 +47,34 @@ body {
 
   color: #08140c !important;
   font-weight: 800;
-  letter-spacing: .2px;
+  letter-spacing: 0.2px;
 
   box-shadow:
     0 12px 34px rgba(10, 221, 8, 0.45),
-    inset 0 1px 0 rgba(255,255,255,.45);
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
 
-  transition:
-    transform .15s ease,
-    box-shadow .15s ease,
-    filter .15s ease;
-
-    .uz-primary-btn { background: hotpink !important; }
-
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
-/* Hover — brighter + lift */
-.uz-primary-btn:hover{
+.uz-primary-btn:hover {
   transform: translateY(-1px);
   filter: brightness(1.08);
-  box-shadow:
-    0 18px 48px rgba(10, 221, 8, 0.65),
-    inset 0 1px 0 rgba(255,255,255,.55);
 }
 
-/* Active */
-.uz-primary-btn:active{
-  transform: translateY(0);
-  filter: brightness(0.97);
-}
-
-/* Disabled */
-.uz-primary-btn:disabled{
-  background: linear-gradient(
-    135deg,
-    rgba(10,221,8,.25),
-    rgba(75,127,90,.35)
-  );
-  color: rgba(255,255,255,.6);
-  border-color: rgba(255,255,255,.12);
-  box-shadow: none;
+.uz-primary-btn:disabled {
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
-/* Subtle shimmer sweep */
-.uz-primary-btn::before{
-  content:"";
-  position:absolute;
-  inset:-2px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255,255,255,.55),
-    transparent
-  );
-  transform: translateX(-120%);
-  transition: transform .7s ease;
-  pointer-events:none;
-}
+/* ================================
+   QR BUTTON
+   ================================ */
 
-.uz-primary-btn:hover::before{
-  transform: translateX(120%);
-}
-
-
-/* =========================================
-   UZ QR SCANNER BUTTON (Premium Blue)
-   ========================================= */
-
-.uz-qr-btn{
-  display:inline-flex;
-  align-items:center;
-  gap:.5rem;
-  padding:.6rem .9rem;
+.uz-qr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.9rem;
   border-radius: 999px;
 
   background: linear-gradient(
@@ -126,324 +84,34 @@ body {
   );
 
   border: 1px solid rgba(120,160,255,.55);
-  box-shadow:
-    0 6px 20px rgba(70,120,255,.35),
-    inset 0 0 0 1px rgba(255,255,255,.12);
+  box-shadow: 0 6px 20px rgba(70,120,255,.35);
 
-  color: #ffffff;
+  color: #fff;
   font-weight: 700;
-  font-size: .85rem;
-
-  transition:
-    transform .15s ease,
-    box-shadow .15s ease,
-    filter .15s ease;
 }
 
-.uz-qr-btn:hover{
-  transform: translateY(-1px);
-  filter: brightness(1.05);
-  box-shadow:
-    0 10px 30px rgba(70,120,255,.45),
-    inset 0 0 0 1px rgba(255,255,255,.18);
-}
+/* ================================
+   DESTRUCTIVE CTA
+   ================================ */
 
-.uz-qr-btn:active{
-  transform: translateY(0);
-}
-
-.uz-qr-btn:disabled{
-  opacity:.55;
-  cursor:not-allowed;
-  transform:none;
-  box-shadow:none;
-}
-
-.uz-qr-icon{
-  width:16px;
-  height:16px;
-  stroke: white;
-  opacity:.95;
-}
-
-.uz-qr-text{
-  font-size:.92rem;
-  opacity:.95;
-}
-
-/* =========================================
-   UZ QR MODAL
-   ========================================= */
-
-.uz-qr-modal{
-  position:fixed;
-  inset:0;
-  z-index:9999;
-  display:flex;
-  align-items:flex-end;
-  justify-content:center;
-}
-
-.uz-qr-backdrop{
-  position:absolute;
-  inset:0;
-  background: rgba(0,0,0,.55);
-}
-
-/* Sheet */
-
-.uz-qr-sheet{
-  position:relative;
-  width:min(560px, 94vw);
-  margin: 0 0 14px 0;
-  padding-bottom: calc(14px + env(safe-area-inset-bottom));
-  border-radius: 18px;
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(10,14,26,.66);
-  box-shadow: 0 20px 60px rgba(0,0,0,.45);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  overflow:hidden;
-}
-
-/* Header */
-
-.uz-qr-head{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding: 14px 14px 10px 14px;
-}
-
-.uz-qr-title{
-  font-weight:700;
-  letter-spacing:.2px;
-  color: rgba(255,255,255,.92);
-}
-
-.uz-qr-close{
-  width:36px;
-  height:36px;
-  border-radius: 12px;
-  border:1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.06);
-  color: rgba(255,255,255,.9);
-  transition: transform .15s ease, background .15s ease;
-}
-
-.uz-qr-close:hover{
-  transform: translateY(-1px);
-  background: rgba(255,255,255,.09);
-}
-
-/* Camera */
-
-.uz-qr-video-wrap{
-  position:relative;
-  padding: 0 14px 14px 14px;
-}
-
-.uz-qr-video{
-  width:100%;
-  aspect-ratio: 1 / 1;
-  border-radius: 16px;
-  object-fit: cover;
-  background: rgba(0,0,0,.25);
-  border:1px solid rgba(255,255,255,.12);
-}
-
-.uz-qr-frame{
-  pointer-events:none;
-  position:absolute;
-  left:14px;
-  right:14px;
-  top:0;
-  bottom:14px;
-  border-radius: 16px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,.10),
-    inset 0 0 0 999px rgba(0,0,0,.10);
-}
-
-/* Actions */
-
-.uz-qr-actions{
-  display:flex;
-  gap:10px;
-  padding: 0 14px 12px 14px;
-}
-
-.uz-qr-action{
-  flex:1;
-  padding: .7rem .9rem;
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.06);
-  color: rgba(255,255,255,.92);
-  transition: transform .15s ease, background .15s ease, border-color .15s ease;
-}
-
-.uz-qr-action:hover{
-  transform: translateY(-1px);
-  background: rgba(255,255,255,.09);
-  border-color: rgba(255,255,255,.20);
-}
-
-.uz-qr-action:disabled{
-  opacity:.55;
-  cursor:not-allowed;
-  transform:none;
-}
-
-.uz-qr-action-primary{
-  border-color: rgba(120,160,255,.30);
-  background: linear-gradient(
-    90deg,
-    rgba(90,120,255,.18),
-    rgba(190,120,255,.18),
-    rgba(255,210,90,.14)
-  );
-}
-
-/* Messaging */
-
-.uz-qr-error{
-  padding: 0 14px 10px 14px;
-  color: rgba(255,140,140,.95);
-  font-size: .92rem;
-}
-
-.uz-qr-tip{
-  padding: 0 14px 14px 14px;
-  color: rgba(255,255,255,.68);
-  font-size: .9rem;
-}
-
-/* ========= UTILIZAP DESTRUCTIVE CTA (Disconnect Wallet) ========= */
-.uz-danger-btn{
-  position: relative;
-  overflow: hidden;
-
+.uz-danger-btn {
   background: linear-gradient(
     135deg,
-    #ff4d4d 0%,
-    #e63b3b 45%,
-    #7a1f1f 100%
+    #ff4d4d,
+    #e63b3b
   );
 
-  border: 1px solid rgba(255, 77, 77, 0.45);
   border-radius: 12px;
-
-  color: #ffffff;
+  padding: 10px;
   font-weight: 700;
-  letter-spacing: .2px;
-
-  box-shadow:
-    0 10px 30px rgba(255, 77, 77, 0.35),
-    inset 0 1px 0 rgba(255,255,255,.25);
-
-  transition:
-    transform .15s ease,
-    box-shadow .15s ease,
-    filter .15s ease;
-}
-
-/* Hover */
-.uz-danger-btn:hover{
-  transform: translateY(-1px);
-  filter: brightness(1.06);
-  box-shadow:
-    0 16px 44px rgba(255, 77, 77, 0.45),
-    inset 0 1px 0 rgba(255,255,255,.35);
-}
-
-/* Active */
-.uz-danger-btn:active{
-  transform: translateY(0);
-  filter: brightness(0.97);
-}
-
-/* Optional subtle shimmer */
-.uz-danger-btn::before{
-  content:"";
-  position:absolute;
-  inset:-2px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255,255,255,.35),
-    transparent
-  );
-  transform: translateX(-120%);
-  transition: transform .6s ease;
-  pointer-events:none;
-}
-
-.uz-danger-btn:hover::before{
-  transform: translateX(120%);
+  color: #fff;
 }
 
 /* ================================
-   Wallet Adapter Button — Mobile Fix
-   Prevents "Select Wallet" giant button after disconnect
+   Wallet Adapter Button (SAFE)
    ================================ */
 
-.uz-wallet-btn{
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  white-space: nowrap !important;
-  max-width: 180px;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-}
-
-/* On small screens: force compact button */
-@media (max-width: 640px){
-  .uz-wallet-btn{
-    max-width: 140px !important;
-    padding: 10px 12px !important;
-    border-radius: 14px !important;
-    gap: 8px !important;
-  }
-
-  /* hide long text like "Select Wallet" */
-  .uz-wallet-btn .wallet-adapter-button-start-icon{
-    margin-right: 0 !important;
-  }
-
-  /* Most important: limit label width + ellipsis */
-  .uz-wallet-btn .wallet-adapter-button-text{
-    display: inline-block !important;
-    max-width: 80px !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
-  }
-}
-
-@media (max-width: 640px){
-  .uz-wallet-btn .wallet-adapter-button-text{
-    max-width: 0 !important;
-    opacity: 0 !important;
-    width: 0 !important;
-    overflow: hidden !important;
-  }
-
-  /* keep icon visible so it still feels like wallet */
-  .uz-wallet-btn{
-    width: 52px !important;
-    padding: 10px 10px !important;
-  }
-}
-
-/* ================================
-   UTILIZAP — Wallet Button (Premium + Mobile-safe)
-   Applied via: <WalletMultiButton className="uz-wallet-btn" />
-   ================================ */
-
-.uz-wallet-btn{
-  position: relative !important;
+.uz-wallet-btn {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -452,7 +120,6 @@ body {
   padding: 10px 14px !important;
   border-radius: 16px !important;
 
-  /* premium purple glass */
   background: linear-gradient(
     135deg,
     rgba(var(--uz-blue), .32),
@@ -460,124 +127,10 @@ body {
   ) !important;
 
   border: 1px solid rgba(255,255,255,.14) !important;
-
-  box-shadow:
-    0 14px 40px rgba(120,80,255,.18),
-    inset 0 1px 0 rgba(255,255,255,.16) !important;
-
   color: rgba(255,255,255,.94) !important;
+
   font-weight: 700 !important;
-  letter-spacing: .2px !important;
-
   cursor: pointer !important;
-  user-select: none !important;
-
-  /* critical: prevent mobile blowout */
-  white-space: nowrap !important;
-  max-width: 190px !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-
-  transition: transform .15s ease, filter .15s ease, box-shadow .15s ease !important;
-}
-
-.uz-wallet-btn:hover{
-  transform: translateY(-1px) !important;
-  filter: brightness(1.06) !important;
-  box-shadow:
-    0 18px 56px rgba(120,80,255,.26),
-    inset 0 1px 0 rgba(255,255,255,.20) !important;
-}
-
-.uz-wallet-btn:active{
-  transform: translateY(0) !important;
-  filter: brightness(0.98) !important;
-}
-
-/* Label inside WalletMultiButton */
-.uz-wallet-btn .wallet-adapter-button-text{
-  display: inline-block !important;
-  max-width: 120px !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
   white-space: nowrap !important;
 }
 
-/* Make the icon tighter */
-.uz-wallet-btn .wallet-adapter-button-start-icon{
-  margin-right: 0 !important;
-}
-
-/* ================================
-   Mobile fix for the disconnect state "Select Wallet"
-   ================================ */
-@media (max-width: 640px){
-  .uz-wallet-btn{
-    max-width: 140px !important;
-    padding: 10px 12px !important;
-    border-radius: 14px !important;
-  }
-
-  .uz-wallet-btn .wallet-adapter-button-text{
-    max-width: 78px !important;
-  }
-}
-
-/* ================================
-   UTILIZAP — Copy Button (Premium Blue)
-   Matches Scan button
-   ================================ */
-
-.uz-copy-btn{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  gap:.4rem;
-
-  padding:.6rem 1rem;
-  border-radius: 999px;
-
-  background: linear-gradient(
-    135deg,
-    rgba(70,120,255,.95),
-    rgba(120,160,255,.95)
-  );
-
-  border: 1px solid rgba(120,160,255,.55);
-
-  box-shadow:
-    0 6px 20px rgba(70,120,255,.35),
-    inset 0 0 0 1px rgba(255,255,255,.12);
-
-  color:#ffffff;
-  font-weight:700;
-  font-size:.85rem;
-
-  cursor:pointer;
-  white-space:nowrap;
-
-  transition:
-    transform .15s ease,
-    box-shadow .15s ease,
-    filter .15s ease;
-}
-
-.uz-copy-btn:hover{
-  transform: translateY(-1px);
-  filter: brightness(1.05);
-  box-shadow:
-    0 10px 30px rgba(70,120,255,.45),
-    inset 0 0 0 1px rgba(255,255,255,.18);
-}
-
-.uz-copy-btn:active{
-  transform: translateY(0);
-  filter: brightness(.98);
-}
-
-.uz-copy-btn:disabled{
-  opacity:.55;
-  cursor:not-allowed;
-  transform:none;
-  box-shadow:none;
-}
