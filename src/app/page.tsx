@@ -4,6 +4,8 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import QRCode from "qrcode";
 
 import { getSolBalance, getSplTokenBalance } from "./lib/balances";
 import { sendUsdcDevnet, isValidSolanaAddress } from "./lib/transfer";
@@ -31,6 +33,58 @@ const formatUsd = (n: number) =>
     maximumFractionDigits: 2,
   }).format(n);
 
+// --------------------
+// CONTACTS (local-only)
+// --------------------
+type Contact = {
+  id: string;
+  name: string;
+  address: string;
+};
+
+const CONTACTS_KEY = "uz_contacts_v1";
+
+function safeParseContacts(raw: string | null): Contact[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (c) =>
+          c &&
+          typeof c.id === "string" &&
+          typeof c.name === "string" &&
+          typeof c.address === "string"
+      )
+      .map((c) => ({
+        id: c.id,
+        name: c.name.trim(),
+        address: c.address.trim(),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function loadContacts(): Contact[] {
+  if (typeof window === "undefined") return [];
+  return safeParseContacts(window.localStorage.getItem(CONTACTS_KEY));
+}
+
+function saveContacts(next: Contact[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(CONTACTS_KEY, JSON.stringify(next));
+}
+
+function makeId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    // @ts-ignore
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
 export default function Home() {
   const { connection } = useConnection();
   const { publicKey, connected, signTransaction, disconnect } = useWallet();
@@ -46,6 +100,10 @@ export default function Home() {
   const [txSig, setTxSig] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
 
+  // CONTACTS state
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contactName, setContactName] = useState("");
+
   const explorerUrl = txSig
     ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
     : null;
@@ -53,6 +111,133 @@ export default function Home() {
   // Hydration-safe UI gate
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // --------------------
+  // Step 2: REQUEST PAYMENT LINK (generator + copy + QR)
+  // --------------------
+  const [origin, setOrigin] = useState<string>("");
+  const [requestAmount, setRequestAmount] = useState<string>("");
+  const [copied, setCopied] = useState(false);
+
+  // QR (for request link)
+  const [showRequestQr, setShowRequestQr] = useState(false);
+  const [requestQr, setRequestQr] = useState<string>("");
+
+  useEffect(() => {
+    if (!mounted) return;
+    setOrigin(window.location.origin);
+  }, [mounted]);
+
+  const requestLink = useMemo(() => {
+    if (!origin || !publicKey) return "";
+    const to = publicKey.toBase58();
+
+    const params = new URLSearchParams();
+    params.set("to", to);
+
+    const a = requestAmount.trim();
+    if (a) {
+      const n = Number(a);
+      if (Number.isFinite(n) && n > 0) {
+        params.set("amount", a);
+      }
+    }
+
+    return `${origin}/?${params.toString()}`;
+  }, [origin, publicKey, requestAmount]);
+
+  async function copyRequestLink() {
+    if (!requestLink) return;
+    try {
+      await navigator.clipboard.writeText(requestLink);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // fallback (rare)
+      try {
+        const el = document.getElementById("uz-request-link") as HTMLInputElement;
+        if (el) {
+          el.focus();
+          el.select();
+          document.execCommand("copy");
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1400);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  // Generate QR image whenever requestLink changes
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      if (!requestLink) {
+        setRequestQr("");
+        return;
+      }
+      try {
+        const dataUrl = await QRCode.toDataURL(requestLink, {
+          width: 220,
+          margin: 1,
+        });
+        if (!cancelled) setRequestQr(dataUrl);
+      } catch {
+        if (!cancelled) setRequestQr("");
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [requestLink]);
+
+  // If link becomes empty, hide QR
+  useEffect(() => {
+    if (!requestLink) setShowRequestQr(false);
+  }, [requestLink]);
+
+  // --------------------
+  // SHAREABLE PAY LINK PREFILL (Step 1)
+  // Format: /?to=ADDRESS&amount=1.25
+  // --------------------
+  const searchParams = useSearchParams();
+  const [prefillDone, setPrefillDone] = useState(false);
+
+  useEffect(() => {
+    if (!mounted) return;
+    if (prefillDone) return;
+
+    const to = searchParams.get("to");
+    const amt = searchParams.get("amount");
+
+    let didAnything = false;
+
+    if (to && isValidSolanaAddress(to.trim())) {
+      setRecipient(to.trim());
+      didAnything = true;
+    }
+
+    if (amt) {
+      const clean = amt.trim();
+      const n = Number(clean);
+      if (Number.isFinite(n) && n > 0) {
+        setAmount(clean);
+        didAnything = true;
+      }
+    }
+
+    if (didAnything) setPrefillDone(true);
+  }, [mounted, prefillDone, searchParams]);
+
+  // Load contacts after mount
+  useEffect(() => {
+    const initial = loadContacts();
+    setContacts(initial);
+  }, []);
 
   const refreshBalances = async () => {
     if (!publicKey) {
@@ -82,6 +267,13 @@ export default function Home() {
     const amt = Number(amount);
     return Number.isFinite(amt) && amt > 0;
   }, [publicKey, connected, signTransaction, recipient, amount]);
+
+  // Selected contact display (safe / UI-only)
+  const selectedContact = useMemo(() => {
+    const r = recipient.trim().toLowerCase();
+    if (!r) return null;
+    return contacts.find((c) => c.address.trim().toLowerCase() === r) ?? null;
+  }, [contacts, recipient]);
 
   const onSendUsdc = async () => {
     try {
@@ -128,19 +320,55 @@ export default function Home() {
 
   const isConfirmed = txStage === "confirmed";
 
-  // Keep your existing "display" strings for other places if needed
-  const solDisplay =
-    solBalance === null
-      ? "—"
-      : solBalance < 1
-      ? solBalance.toFixed(4)
-      : solBalance.toFixed(2);
-
   // USDC "cash" display (big)
   const usdcCash = usdcBalance === null ? "—" : formatUsd(usdcBalance);
 
   // SOL precise display (small)
   const solPrecise = solBalance === null ? "—" : solBalance.toFixed(4);
+
+  // --------------------
+  // CONTACTS helpers
+  // --------------------
+  function chooseContact(address: string) {
+    setRecipient(address);
+  }
+
+  function deleteContact(id: string) {
+    setContacts((prev) => {
+      const next = prev.filter((c) => c.id !== id);
+      saveContacts(next);
+      return next;
+    });
+  }
+
+  function addContactFromRecipient() {
+    const name = contactName.trim();
+    const address = recipient.trim();
+
+    if (!name) return;
+    if (!address) return;
+    if (!isValidSolanaAddress(address)) return;
+
+    const newContact: Contact = { id: makeId(), name, address };
+
+    setContacts((prev) => {
+      const addrLower = address.toLowerCase();
+      const nameLower = name.toLowerCase();
+
+      const exists = prev.some(
+        (c) =>
+          c.address.toLowerCase() === addrLower ||
+          (c.address.toLowerCase() === addrLower &&
+            c.name.toLowerCase() === nameLower)
+      );
+
+      const next = exists ? prev : [newContact, ...prev];
+      saveContacts(next);
+      return next;
+    });
+
+    setContactName("");
+  }
 
   return (
     <main className="min-h-screen text-white bg-black relative">
@@ -291,6 +519,95 @@ export default function Home() {
               </div>
 
               <div className="mt-4">
+                {/* Request payment link */}
+                <div className="mb-5 rounded-2xl border border-white/10 bg-black/30 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-white">
+                        Request Payment Link
+                      </div>
+                      <div className="mt-1 text-xs text-zinc-400">
+                        Share a link that opens UTILIZAP pre-filled to pay you
+                      </div>
+                    </div>
+                    <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/5 text-zinc-300">
+                      Shareable
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-1">
+                      <label className="text-xs text-zinc-400">
+                        Amount (optional)
+                      </label>
+                      <input
+                        value={requestAmount}
+                        onChange={(e) => setRequestAmount(e.target.value)}
+                        placeholder="e.g., 25"
+                        className="w-full mt-2 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                        inputMode="decimal"
+                        disabled={!mounted}
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="text-xs text-zinc-400">Link</label>
+                      <div className="mt-2 flex items-center gap-3">
+                        <input
+                          id="uz-request-link"
+                          value={requestLink || ""}
+                          readOnly
+                          className="w-full rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none text-zinc-200"
+                          placeholder="Connect wallet to generate link…"
+                        />
+                        <button
+                          type="button"
+                          onClick={copyRequestLink}
+                          disabled={!requestLink}
+                          className="rounded-lg px-4 py-3 text-sm font-semibold border border-white/10 bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Copy link"
+                        >
+                          {copied ? "Copied ✓" : "Copy"}
+                        </button>
+                      </div>
+                      <div className="mt-2 text-[11px] text-zinc-500">
+                        Opens:{" "}
+                        <span className="text-zinc-300">
+                          Recipient + Amount
+                        </span>{" "}
+                        auto-filled
+                      </div>
+
+                      {/* Payment-link QR toggle */}
+                      <div className="mt-3 flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setShowRequestQr((v) => !v)}
+                          disabled={!requestLink}
+                          className="rounded-lg px-3 py-2 text-xs font-semibold border border-white/10 bg-black/30 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {showRequestQr ? "Hide QR" : "Show QR"}
+                        </button>
+                        <span className="text-[11px] text-zinc-400">
+                          Scan to open payment request
+                        </span>
+                      </div>
+
+                      {showRequestQr && requestQr && (
+                        <div className="mt-4 flex justify-center">
+                          <div className="rounded-xl bg-black p-3 border border-white/10">
+                            <img
+                              src={requestQr}
+                              alt="Payment request QR"
+                              className="h-[220px] w-[220px]"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <label className="text-xs text-zinc-400">Recipient</label>
 
                 {/* ✅ Scanner panel lives HERE (above the row) so it never pushes left */}
@@ -303,7 +620,7 @@ export default function Home() {
                   />
                 ) : null}
 
-                {/* Input row ALWAYS stays below */}
+                {/* Recipient row */}
                 <div className="mt-2 mb-4 flex items-center gap-3">
                   <input
                     value={recipient}
@@ -316,6 +633,17 @@ export default function Home() {
                     spellCheck={false}
                     disabled={isBusy}
                   />
+
+                  {/* Clear recipient */}
+                  <button
+                    type="button"
+                    onClick={() => setRecipient("")}
+                    disabled={isBusy || !recipient.trim()}
+                    className="rounded-lg px-3 py-3 text-xs font-semibold border border-white/10 bg-black/30 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Clear recipient"
+                  >
+                    Clear
+                  </button>
 
                   {mounted ? (
                     <QrScanButton
@@ -332,6 +660,114 @@ export default function Home() {
                     >
                       <span className="uz-qr-text">Scan</span>
                     </button>
+                  )}
+                </div>
+
+                {/* Selected contact label */}
+                {selectedContact ? (
+                  <div className="mt-1 mb-3 text-xs text-zinc-400">
+                    Selected contact:{" "}
+                    <span className="text-white/80 font-semibold">
+                      {selectedContact.name}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="mb-3" />
+                )}
+
+                {/* CONTACTS */}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-zinc-400">Contacts</p>
+                    <p className="text-[11px] text-zinc-500">
+                      Saved on this device
+                    </p>
+                  </div>
+
+                  <div className="mt-2 flex flex-col sm:flex-row gap-3">
+                    <input
+                      value={contactName}
+                      onChange={(e) => setContactName(e.target.value)}
+                      placeholder="Name (e.g., Mike)"
+                      className="w-full sm:flex-1 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                      disabled={isBusy}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={addContactFromRecipient}
+                      disabled={
+                        isBusy ||
+                        !contactName.trim() ||
+                        !isValidSolanaAddress(recipient.trim())
+                      }
+                      className="rounded-lg px-4 py-3 text-sm font-semibold border border-white/10 bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Save Contact
+                    </button>
+                  </div>
+
+                  {contacts.length > 0 ? (
+                    <div className="mt-3 rounded-xl border border-white/10 bg-black/30 overflow-hidden">
+                      {contacts.map((c) => {
+                        const isSelected =
+                          recipient.trim().toLowerCase() ===
+                          c.address.toLowerCase();
+
+                        return (
+                          <div
+                            key={c.id}
+                            className={[
+                              "flex items-center justify-between gap-3 px-3 py-3 border-b border-white/10 last:border-b-0",
+                              isSelected
+                                ? "bg-white/10"
+                                : "hover:bg-white/[0.06]",
+                            ].join(" ")}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => chooseContact(c.address)}
+                              disabled={isBusy}
+                              className="text-left flex-1 min-w-0"
+                              title="Use this contact"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-sm font-semibold text-white truncate">
+                                  {c.name}
+                                </span>
+                                {isSelected ? (
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full border border-white/10 bg-white/10 text-zinc-200">
+                                    Selected
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 text-[11px] text-zinc-400 font-mono truncate">
+                                {c.address}
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => deleteContact(c.id)}
+                              disabled={isBusy}
+                              className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold border border-white/10 bg-black/30 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Delete contact"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-xs text-zinc-400">
+                      No contacts yet. Enter a name and use a valid recipient
+                      address, then hit{" "}
+                      <span className="text-white/80 font-semibold">
+                        Save Contact
+                      </span>
+                      .
+                    </div>
                   )}
                 </div>
 
