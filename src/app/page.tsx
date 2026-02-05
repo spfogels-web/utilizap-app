@@ -3,7 +3,7 @@
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import QRCode from "qrcode";
 
@@ -85,7 +85,9 @@ function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-export default function Home() {
+// ✅ Inner component that uses useSearchParams()
+// Wrapped by Suspense in the default export below.
+function HomeInner() {
   const { connection } = useConnection();
   const { publicKey, connected, signTransaction, disconnect } = useWallet();
 
@@ -155,7 +157,9 @@ export default function Home() {
     } catch {
       // fallback (rare)
       try {
-        const el = document.getElementById("uz-request-link") as HTMLInputElement;
+        const el = document.getElementById(
+          "uz-request-link"
+        ) as HTMLInputElement;
         if (el) {
           el.focus();
           el.select();
@@ -564,12 +568,13 @@ export default function Home() {
                           type="button"
                           onClick={copyRequestLink}
                           disabled={!requestLink}
-                          className="rounded-lg px-4 py-3 text-sm font-semibold border border-white/10 bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="uz-btn-secondary"
                           title="Copy link"
                         >
                           {copied ? "Copied ✓" : "Copy"}
                         </button>
                       </div>
+
                       <div className="mt-2 text-[11px] text-zinc-500">
                         Opens:{" "}
                         <span className="text-zinc-300">
@@ -584,7 +589,7 @@ export default function Home() {
                           type="button"
                           onClick={() => setShowRequestQr((v) => !v)}
                           disabled={!requestLink}
-                          className="rounded-lg px-3 py-2 text-xs font-semibold border border-white/10 bg-black/30 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="uz-btn-secondary"
                         >
                           {showRequestQr ? "Hide QR" : "Show QR"}
                         </button>
@@ -636,14 +641,15 @@ export default function Home() {
 
                   {/* Clear recipient */}
                   <button
-                    type="button"
-                    onClick={() => setRecipient("")}
-                    disabled={isBusy || !recipient.trim()}
-                    className="rounded-lg px-3 py-3 text-xs font-semibold border border-white/10 bg-black/30 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Clear recipient"
-                  >
-                    Clear
-                  </button>
+  type="button"
+  onClick={() => setRecipient("")}
+  disabled={isBusy || !recipient.trim()}
+  className="uz-btn-clear"
+  title="Clear recipient"
+>
+  Clear
+</button>
+
 
                   {mounted ? (
                     <QrScanButton
@@ -653,12 +659,8 @@ export default function Home() {
                       disabled={!connected || isBusy}
                     />
                   ) : (
-                    <button
-                      type="button"
-                      className="uz-qr-btn opacity-60 cursor-not-allowed"
-                      disabled
-                    >
-                      <span className="uz-qr-text">Scan</span>
+                    <button type="button" className="uz-btn-secondary" disabled>
+                      Scan
                     </button>
                   )}
                 </div>
@@ -701,7 +703,7 @@ export default function Home() {
                         !contactName.trim() ||
                         !isValidSolanaAddress(recipient.trim())
                       }
-                      className="rounded-lg px-4 py-3 text-sm font-semibold border border-white/10 bg-white/10 hover:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="uz-btn-secondary"
                     >
                       Save Contact
                     </button>
@@ -750,7 +752,7 @@ export default function Home() {
                               type="button"
                               onClick={() => deleteContact(c.id)}
                               disabled={isBusy}
-                              className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold border border-white/10 bg-black/30 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="uz-btn-danger-soft"
                               title="Delete contact"
                             >
                               Delete
@@ -835,7 +837,9 @@ export default function Home() {
 
             <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight">
               Venmo-style USDC payments,
-              <span className="block text-zinc-200">Non-custodial. Instant.</span>
+              <span className="block text-zinc-200">
+                Non-custodial. Instant.
+              </span>
             </h1>
 
             <p className="mt-4 max-w-2xl mx-auto text-sm sm:text-base text-zinc-300">
@@ -889,5 +893,19 @@ export default function Home() {
         }
       `}</style>
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-black text-white flex items-center justify-center">
+          <div className="text-sm text-white/70">Loading…</div>
+        </main>
+      }
+    >
+      <HomeInner />
+    </Suspense>
   );
 }

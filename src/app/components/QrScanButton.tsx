@@ -100,7 +100,6 @@ export default function QrScanButton({
         );
 
         scannerRef.current = scanner;
-
         await scanner.start();
 
         if (!alive) {
@@ -122,12 +121,12 @@ export default function QrScanButton({
 
   if (!canUse) return null;
 
-  // ✅ BUTTON MODE (small Scan button)
+  // ✅ BUTTON MODE (Scan pill) — matches theme + QR-looking SVG icon
   if (mode === "button") {
     return (
       <button
         type="button"
-        className="uz-qr-btn"
+        className="uz-scan-pill uz-btn-secondary"
         disabled={disabled}
         onClick={() => {
           if (disabled) return;
@@ -137,27 +136,39 @@ export default function QrScanButton({
         aria-label="Scan QR"
         title="Scan QR"
       >
-        <svg
-          className="uz-qr-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <rect x="3" y="3" width="7" height="7" />
-          <rect x="14" y="3" width="7" height="7" />
-          <rect x="14" y="14" width="7" height="7" />
-          <rect x="3" y="14" width="7" height="7" />
-        </svg>
-        <span className="uz-qr-text">Scan</span>
+        <span className="uz-scan-icon" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            aria-hidden="true"
+            focusable="false"
+          >
+            {/* Finder squares */}
+            <rect x="2" y="2" width="7" height="7" rx="1" fill="#000" />
+            <rect x="4" y="4" width="3" height="3" rx="0.5" fill="#fff" />
+
+            <rect x="15" y="2" width="7" height="7" rx="1" fill="#000" />
+            <rect x="17" y="4" width="3" height="3" rx="0.5" fill="#fff" />
+
+            <rect x="2" y="15" width="7" height="7" rx="1" fill="#000" />
+            <rect x="4" y="17" width="3" height="3" rx="0.5" fill="#fff" />
+
+            {/* QR “data” blocks */}
+            <rect x="11" y="11" width="2" height="2" rx="0.4" fill="#000" />
+            <rect x="14" y="11" width="2" height="2" rx="0.4" fill="#000" />
+            <rect x="11" y="14" width="2" height="2" rx="0.4" fill="#000" />
+            <rect x="16" y="14" width="2" height="2" rx="0.4" fill="#000" />
+            <rect x="14" y="16" width="2" height="2" rx="0.4" fill="#000" />
+          </svg>
+        </span>
+
+        <span className="uz-scan-text">Scan</span>
       </button>
     );
   }
 
-  // ✅ PANEL MODE (centered, big, square) — only renders when open
+  // ✅ PANEL MODE (only renders when open)
   if (!open) return null;
 
   return (

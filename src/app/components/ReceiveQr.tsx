@@ -24,10 +24,7 @@ export default function ReceiveQr({ className = "" }: Props) {
     QRCode.toDataURL(address, {
       margin: 1,
       width: 220,
-      color: {
-        dark: "#000000",
-        light: "#ffffff",
-      },
+      color: { dark: "#000000", light: "#ffffff" },
     }).then(setDataUrl);
   }, [connected, address]);
 
@@ -41,30 +38,18 @@ export default function ReceiveQr({ className = "" }: Props) {
   if (!connected) return null;
 
   return (
-    <div
-      className={`mt-4 rounded-xl border border-white/10 bg-black/40 p-4 ${className}`}
-    >
-      {/* ✅ CENTERED HEADER */}
+    <div className={`mt-4 rounded-xl border border-white/10 bg-black/40 p-4 ${className}`}>
       <div className="text-center space-y-1">
         <div className="text-sm font-semibold">Receive</div>
-        <div className="text-xs text-zinc-400">
-          Let someone scan to pay your wallet
-        </div>
+        <div className="text-xs text-zinc-400">Let someone scan to pay your wallet</div>
       </div>
 
-      {/* Copy button */}
       <div className="mt-3 flex justify-center">
-        <button
-          onClick={onCopy}
-          className="rounded-full px-4 py-2 text-sm font-semibold text-white
-                     bg-gradient-to-r from-blue-500 to-indigo-500
-                     hover:brightness-110 transition"
-        >
-          {copied ? "Copied!" : "Copy"}
+        <button onClick={onCopy} className="uz-btn-secondary">
+          {copied ? "Copied ✓" : "Copy"}
         </button>
       </div>
 
-      {/* QR */}
       {dataUrl && (
         <div className="mt-4 flex justify-center">
           <img
@@ -76,7 +61,6 @@ export default function ReceiveQr({ className = "" }: Props) {
         </div>
       )}
 
-      {/* Address */}
       <div className="mt-3 text-center font-mono text-xs text-zinc-400 break-all">
         {address}
       </div>

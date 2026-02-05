@@ -8,7 +8,7 @@
   --background: #ffffff;
   --foreground: #171717;
 
-  /* Brand (RGB triplets for rgba(var(--uz-*), a)) */
+  /* Brand RGB */
   --uz-blue: 99, 102, 241;
   --uz-purple: 168, 85, 247;
   --uz-gold: 250, 204, 21;
@@ -28,7 +28,7 @@ body {
 }
 
 /* ================================
-   UTILIZAP PRIMARY CTA (Send USDC)
+   PRIMARY CTA — SEND USDC (GREEN)
    ================================ */
 
 .uz-primary-btn {
@@ -53,7 +53,7 @@ body {
     0 12px 34px rgba(10, 221, 8, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.45);
 
-  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  transition: transform 0.15s ease, filter 0.15s ease;
 }
 
 .uz-primary-btn:hover {
@@ -67,40 +67,84 @@ body {
 }
 
 /* ================================
-   QR BUTTON
+   SECONDARY BUTTONS
+   (Copy / Save / Show QR)
    ================================ */
 
-.uz-qr-btn {
+.uz-btn-secondary {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 0.9rem;
+  justify-content: center;
+
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1;
   border-radius: 999px;
 
   background: linear-gradient(
     135deg,
-    rgba(70,120,255,.95),
-    rgba(120,160,255,.95)
+    rgba(var(--uz-blue), 0.85),
+    rgba(var(--uz-purple), 0.85)
   );
 
-  border: 1px solid rgba(120,160,255,.55);
-  box-shadow: 0 6px 20px rgba(70,120,255,.35);
-
-  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.95);
   font-weight: 700;
+
+  box-shadow:
+    0 6px 14px rgba(99, 102, 241, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+
+.uz-btn-secondary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+.uz-btn-secondary:disabled {
+  opacity: 0.85;
+  cursor: not-allowed;
 }
 
 /* ================================
-   DESTRUCTIVE CTA
+   DELETE BUTTON — SOFT → RED
+   ================================ */
+
+.uz-btn-danger-soft {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 999px;
+
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 700;
+
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.uz-btn-danger-soft:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #ff4d4d, #e63b3b);
+}
+
+.uz-btn-danger-soft:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* ================================
+   DISCONNECT WALLET — HARD RED
    ================================ */
 
 .uz-danger-btn {
-  background: linear-gradient(
-    135deg,
-    #ff4d4d,
-    #e63b3b
-  );
-
+  background: linear-gradient(135deg, #ff4d4d, #e63b3b);
   border-radius: 12px;
   padding: 10px;
   font-weight: 700;
@@ -108,7 +152,7 @@ body {
 }
 
 /* ================================
-   Wallet Adapter Button (SAFE)
+   WALLET ADAPTER BUTTON
    ================================ */
 
 .uz-wallet-btn {
@@ -122,15 +166,139 @@ body {
 
   background: linear-gradient(
     135deg,
-    rgba(var(--uz-blue), .32),
-    rgba(var(--uz-purple), .28)
+    rgba(var(--uz-blue), 0.32),
+    rgba(var(--uz-purple), 0.28)
   ) !important;
 
-  border: 1px solid rgba(255,255,255,.14) !important;
-  color: rgba(255,255,255,.94) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: rgba(255, 255, 255, 0.94) !important;
 
   font-weight: 700 !important;
-  cursor: pointer !important;
-  white-space: nowrap !important;
 }
 
+/* ================================
+   SCAN BUTTON — QR TILE ICON
+   ================================ */
+
+.uz-scan-pill {
+  position: relative;
+  overflow: hidden;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.uz-scan-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+
+  display: grid;
+  place-items: center;
+
+  background: #ffffff;
+  border: 2px solid #ffffff;
+}
+
+
+
+.uz-scan-qr {
+  position: relative;
+  width: 14px;
+  height: 14px;
+}
+
+.uz-scan-qr::before,
+.uz-scan-qr::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  background: #000;
+  border-radius: 1px;
+}
+
+.uz-scan-qr::before {
+  top: 0;
+  left: 0;
+}
+
+.uz-scan-qr::after {
+  top: 0;
+  right: 0;
+}
+
+.uz-scan-qr span {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  background: #000;
+  border-radius: 1px;
+}
+
+.uz-scan-qr i {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: 4px;
+  height: 4px;
+  background: #000;
+  border-radius: 1px;
+}
+
+/* ================================
+   CLEAR BUTTON — BLACK → RED
+   ================================ */
+
+.uz-btn-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 999px;
+
+  background: linear-gradient(
+    180deg,
+    #0f0f12 0%,
+    #0a0a0d 100%
+  ) !important;
+
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 700;
+
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease,
+    filter 0.12s ease;
+}
+
+.uz-btn-clear:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #ff4d4d, #e63b3b) !important;
+  border-color: rgba(255, 77, 77, 0.55);
+  filter: brightness(1.05);
+}
+
+.uz-btn-clear:disabled {
+  opacity: 0.85;
+  cursor: not-allowed;
+}
