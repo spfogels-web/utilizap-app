@@ -25,6 +25,115 @@ type TxStage =
   | "confirmed"
   | "failed";
 
+// --------------------
+// RECEIPTS (local-only)
+// --------------------
+type TxReceiptStatus = "submitted" | "confirming" | "confirmed" | "failed";
+
+type TxReceipt = {
+  id: string;
+  sig: string | null;
+  createdAt: number;
+
+  cluster: "devnet" | "mainnet-beta";
+  status: TxReceiptStatus;
+
+  amountUi: string;
+  tokenSymbol: "USDC";
+
+  from: string;
+  to: string;
+
+  explorerUrl: string | null;
+  note?: string;
+};
+
+const RECEIPTS_KEY = "uz_receipts_v1";
+
+function ensureReceiptsStore() {
+  if (typeof window === "undefined") return;
+  try {
+    const existing = window.localStorage.getItem(RECEIPTS_KEY);
+    if (existing === null) window.localStorage.setItem(RECEIPTS_KEY, "[]");
+  } catch {
+    // ignore
+  }
+}
+
+function safeParseReceipts(raw: string | null): TxReceipt[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (r) =>
+          r &&
+          typeof r.id === "string" &&
+          typeof r.createdAt === "number" &&
+          (r.sig === null || typeof r.sig === "string") &&
+          (r.cluster === "devnet" || r.cluster === "mainnet-beta") &&
+          (r.status === "submitted" ||
+            r.status === "confirming" ||
+            r.status === "confirmed" ||
+            r.status === "failed") &&
+          typeof r.amountUi === "string" &&
+          r.tokenSymbol === "USDC" &&
+          typeof r.from === "string" &&
+          typeof r.to === "string"
+      )
+      .map((r) => ({
+        id: r.id,
+        sig: r.sig ?? null,
+        createdAt: r.createdAt,
+        cluster: r.cluster,
+        status: r.status,
+        amountUi: String(r.amountUi ?? "").trim(),
+        tokenSymbol: "USDC" as const,
+        from: String(r.from ?? "").trim(),
+        to: String(r.to ?? "").trim(),
+        explorerUrl: typeof r.explorerUrl === "string" ? r.explorerUrl : null,
+        note: typeof r.note === "string" ? r.note : undefined,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function loadReceipts(): TxReceipt[] {
+  if (typeof window === "undefined") return [];
+  try {
+    ensureReceiptsStore();
+    return safeParseReceipts(window.localStorage.getItem(RECEIPTS_KEY));
+  } catch {
+    return [];
+  }
+}
+
+function saveReceipts(next: TxReceipt[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(RECEIPTS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
+
+function upsertReceipt(next: TxReceipt) {
+  try {
+    ensureReceiptsStore();
+    const prev = loadReceipts();
+    const idx = prev.findIndex((r) => r.id === next.id);
+    const merged =
+      idx >= 0
+        ? [next, ...prev.filter((r) => r.id !== next.id)]
+        : [next, ...prev];
+    saveReceipts(merged);
+  } catch {
+    // ignore
+  }
+}
+
 // Premium currency formatting (USDC as "cash")
 const formatUsd = (n: number) =>
   new Intl.NumberFormat("en-US", {
@@ -85,8 +194,6 @@ function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-// ✅ Inner component that uses useSearchParams()
-// Wrapped by Suspense in the default export below.
 function HomeInner() {
   const { connection } = useConnection();
   const { publicKey, connected, signTransaction, disconnect } = useWallet();
@@ -96,13 +203,33 @@ function HomeInner() {
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
+  const [txNote, setTxNote] = useState("");
   const [isSending, setIsSending] = useState(false);
 
   const [txStage, setTxStage] = useState<TxStage>("idle");
   const [txSig, setTxSig] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
 
-  // CONTACTS state
+  // Receipts
+  const [receipts, setReceipts] = useState<TxReceipt[]>([]);
+  const [activeReceipt, setActiveReceipt] = useState<TxReceipt | null>(null);
+
+  // Receipt UI
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [receiptCopied, setReceiptCopied] = useState(false);
+  const [sigCopied, setSigCopied] = useState(false);
+
+  // ✅ FIXED: no ": any" here
+  const [receiptNoteDraft, setReceiptNoteDraft] = useState<string>("");
+  const [noteSavedTick, setNoteSavedTick] = useState(false);
+
+  // Receipt history controls
+  const [receiptSearch, setReceiptSearch] = useState("");
+  const [receiptFilter, setReceiptFilter] = useState<
+    "all" | "confirmed" | "pending" | "failed"
+  >("all");
+
+  // Contacts
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactName, setContactName] = useState("");
 
@@ -114,14 +241,96 @@ function HomeInner() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  function fmtWhen(ts: number) {
+    try {
+      return new Date(ts).toLocaleString();
+    } catch {
+      return "";
+    }
+  }
+
+  function shortMid(s: string, head = 6, tail = 6) {
+    if (!s) return "—";
+    if (s.length <= head + tail + 3) return s;
+    return `${s.slice(0, head)}…${s.slice(-tail)}`;
+  }
+
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function refreshReceiptsFromStorage() {
+    const latest = loadReceipts();
+    setReceipts(latest);
+  }
+
+  function clearReceiptsHistory() {
+    saveReceipts([]);
+    setReceipts([]);
+    setActiveReceipt(null);
+    setShowReceipt(false);
+  }
+
+  function updateReceiptNote(receiptId: string, note: string) {
+    const all = loadReceipts();
+    const idx = all.findIndex((r) => r.id === receiptId);
+    if (idx < 0) return;
+
+    const updated: TxReceipt = {
+      ...all[idx],
+      note: note.trim() ? note.trim() : undefined,
+    };
+
+    upsertReceipt(updated);
+    setReceipts(loadReceipts());
+    setActiveReceipt((prev) => (prev?.id === receiptId ? updated : prev));
+  }
+
+  function resetForNewPayment() {
+    setRecipient("");
+    setAmount("");
+    setTxNote("");
+
+    setTxStage("idle");
+    setTxSig(null);
+    setTxError(null);
+    setIsSending(false);
+
+    setShowReceipt(false);
+    setActiveReceipt(null);
+
+    setReceiptCopied(false);
+    setSigCopied(false);
+    setReceiptNoteDraft("");
+    setNoteSavedTick(false);
+  }
+
+  const receiptAmountDisplay = useMemo(() => {
+    if (!activeReceipt) return "—";
+    const s = (activeReceipt.amountUi ?? "").trim();
+    if (!s) return "—";
+    const n = Number(s);
+    if (Number.isFinite(n) && n > 0) return formatUsd(n);
+    return s;
+  }, [activeReceipt]);
+
+  const receiptTokenDisplay = useMemo(() => {
+    if (!activeReceipt) return "USDC";
+    return activeReceipt.tokenSymbol ?? "USDC";
+  }, [activeReceipt]);
+
   // --------------------
-  // Step 2: REQUEST PAYMENT LINK (generator + copy + QR)
+  // REQUEST PAYMENT LINK (generator + copy + QR)
   // --------------------
   const [origin, setOrigin] = useState<string>("");
   const [requestAmount, setRequestAmount] = useState<string>("");
   const [copied, setCopied] = useState(false);
 
-  // QR (for request link)
   const [showRequestQr, setShowRequestQr] = useState(false);
   const [requestQr, setRequestQr] = useState<string>("");
 
@@ -155,7 +364,6 @@ function HomeInner() {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
-      // fallback (rare)
       try {
         const el = document.getElementById(
           "uz-request-link"
@@ -173,7 +381,6 @@ function HomeInner() {
     }
   }
 
-  // Generate QR image whenever requestLink changes
   useEffect(() => {
     let cancelled = false;
 
@@ -199,14 +406,12 @@ function HomeInner() {
     };
   }, [requestLink]);
 
-  // If link becomes empty, hide QR
   useEffect(() => {
     if (!requestLink) setShowRequestQr(false);
   }, [requestLink]);
 
   // --------------------
-  // SHAREABLE PAY LINK PREFILL (Step 1)
-  // Format: /?to=ADDRESS&amount=1.25
+  // SHAREABLE PAY LINK PREFILL
   // --------------------
   const searchParams = useSearchParams();
   const [prefillDone, setPrefillDone] = useState(false);
@@ -237,11 +442,39 @@ function HomeInner() {
     if (didAnything) setPrefillDone(true);
   }, [mounted, prefillDone, searchParams]);
 
-  // Load contacts after mount
+  // Load contacts
   useEffect(() => {
     const initial = loadContacts();
     setContacts(initial);
   }, []);
+
+  // Init + load receipts
+  useEffect(() => {
+    ensureReceiptsStore();
+    const initial = loadReceipts();
+    setReceipts(initial);
+  }, []);
+
+  // Keep note draft in sync when opening receipt
+  useEffect(() => {
+    if (!activeReceipt) {
+      setReceiptNoteDraft("");
+      return;
+    }
+    setReceiptNoteDraft(activeReceipt.note ?? "");
+    setNoteSavedTick(false);
+  }, [activeReceipt]);
+
+  // Auto-open receipt when confirmed/failed
+  useEffect(() => {
+    if (!activeReceipt) return;
+    if (
+      activeReceipt.status === "confirmed" ||
+      activeReceipt.status === "failed"
+    ) {
+      setShowReceipt(true);
+    }
+  }, [activeReceipt]);
 
   const refreshBalances = async () => {
     if (!publicKey) {
@@ -272,31 +505,123 @@ function HomeInner() {
     return Number.isFinite(amt) && amt > 0;
   }, [publicKey, connected, signTransaction, recipient, amount]);
 
-  // Selected contact display (safe / UI-only)
   const selectedContact = useMemo(() => {
     const r = recipient.trim().toLowerCase();
     if (!r) return null;
     return contacts.find((c) => c.address.trim().toLowerCase() === r) ?? null;
   }, [contacts, recipient]);
 
+  function receiptBadgeClasses(status: TxReceiptStatus) {
+    if (status === "confirmed")
+      return "border-emerald-400/30 bg-emerald-400/10 text-emerald-200";
+    if (status === "failed")
+      return "border-red-400/30 bg-red-400/10 text-red-200";
+    if (status === "confirming")
+      return "border-white/15 bg-white/5 text-zinc-200";
+    return "border-white/10 bg-white/5 text-zinc-300";
+  }
+
+  function receiptStatusLabel(status: TxReceiptStatus) {
+    if (status === "confirmed") return "Confirmed";
+    if (status === "failed") return "Failed";
+    if (status === "confirming") return "Confirming";
+    return "Submitted";
+  }
+
+  function receiptAmountPretty(amountUi: string) {
+    const s = (amountUi ?? "").trim();
+    const n = Number(s);
+    if (Number.isFinite(n) && n > 0) return formatUsd(n);
+    return s || "—";
+  }
+
+  const filteredReceipts = useMemo(() => {
+    const q = receiptSearch.trim().toLowerCase();
+
+    function matchesFilter(r: TxReceipt) {
+      if (receiptFilter === "all") return true;
+      if (receiptFilter === "confirmed") return r.status === "confirmed";
+      if (receiptFilter === "failed") return r.status === "failed";
+      // pending
+      return r.status === "submitted" || r.status === "confirming";
+    }
+
+    function matchesQuery(r: TxReceipt) {
+      if (!q) return true;
+      const hay = [
+        r.to,
+        r.from,
+        r.sig ?? "",
+        r.amountUi,
+        r.note ?? "",
+        r.status,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    }
+
+    return receipts.filter((r) => matchesFilter(r) && matchesQuery(r));
+  }, [receipts, receiptSearch, receiptFilter]);
+
+  const recentReceipts = useMemo(
+    () => filteredReceipts.slice(0, 10),
+    [filteredReceipts]
+  );
+
   const onSendUsdc = async () => {
+    const from = publicKey?.toBase58() ?? "";
+    const to = recipient.trim();
+    const amountUi = amount.trim();
+    const note = txNote.trim();
+
+    const receiptId = makeId();
+    const receiptDraft: TxReceipt = {
+      id: receiptId,
+      sig: null,
+      createdAt: Date.now(),
+      cluster: "devnet",
+      status: "submitted",
+      amountUi,
+      tokenSymbol: "USDC",
+      from,
+      to,
+      explorerUrl: null,
+      note: note ? note : undefined,
+    };
+
     try {
       setTxError(null);
       setTxSig(null);
       setTxStage("signing");
       setIsSending(true);
 
+      upsertReceipt(receiptDraft);
+      setReceipts(loadReceipts());
+      setActiveReceipt(receiptDraft);
+
       const { signature, blockhash, lastValidBlockHeight } =
         await sendUsdcDevnet({
           connection,
           sender: publicKey!,
-          recipient: new PublicKey(recipient.trim()),
-          amountUi: amount,
+          recipient: new PublicKey(to),
+          amountUi,
           signTransaction: signTransaction!,
         });
 
       setTxSig(signature);
       setTxStage("confirming");
+
+      const withSig: TxReceipt = {
+        ...receiptDraft,
+        sig: signature,
+        status: "confirming",
+        explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=devnet`,
+      };
+
+      upsertReceipt(withSig);
+      setReceipts(loadReceipts());
+      setActiveReceipt(withSig);
 
       const conf = await connection.confirmTransaction(
         { signature, blockhash, lastValidBlockHeight },
@@ -305,11 +630,29 @@ function HomeInner() {
 
       if (conf.value.err) throw new Error("Transaction failed");
 
+      const confirmed: TxReceipt = {
+        ...withSig,
+        status: "confirmed",
+      };
+
+      upsertReceipt(confirmed);
+      setReceipts(loadReceipts());
+      setActiveReceipt(confirmed);
+
       setTxStage("confirmed");
       refreshBalances();
     } catch (e: any) {
       setTxStage("failed");
       setTxError(e?.message ?? "Send failed");
+
+      const failed: TxReceipt = {
+        ...receiptDraft,
+        status: "failed",
+      };
+
+      upsertReceipt(failed);
+      setReceipts(loadReceipts());
+      setActiveReceipt(failed);
     } finally {
       setIsSending(false);
     }
@@ -324,15 +667,10 @@ function HomeInner() {
 
   const isConfirmed = txStage === "confirmed";
 
-  // USDC "cash" display (big)
   const usdcCash = usdcBalance === null ? "—" : formatUsd(usdcBalance);
-
-  // SOL precise display (small)
   const solPrecise = solBalance === null ? "—" : solBalance.toFixed(4);
 
-  // --------------------
   // CONTACTS helpers
-  // --------------------
   function chooseContact(address: string) {
     setRecipient(address);
   }
@@ -357,14 +695,7 @@ function HomeInner() {
 
     setContacts((prev) => {
       const addrLower = address.toLowerCase();
-      const nameLower = name.toLowerCase();
-
-      const exists = prev.some(
-        (c) =>
-          c.address.toLowerCase() === addrLower ||
-          (c.address.toLowerCase() === addrLower &&
-            c.name.toLowerCase() === nameLower)
-      );
+      const exists = prev.some((c) => c.address.toLowerCase() === addrLower);
 
       const next = exists ? prev : [newContact, ...prev];
       saveContacts(next);
@@ -376,7 +707,7 @@ function HomeInner() {
 
   return (
     <main className="min-h-screen text-white bg-black relative">
-      {/* Premium background layers (non-clickable) */}
+      {/* Premium background layers */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_20%_10%,rgba(120,80,255,.20),transparent_60%)]" />
         <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_80%_20%,rgba(255,210,120,.14),transparent_60%)]" />
@@ -384,7 +715,6 @@ function HomeInner() {
         <div className="absolute inset-0 opacity-30 bg-[linear-gradient(to_right,rgba(255,255,255,.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.06)_1px,transparent_1px)] bg-[size:64px_64px]" />
       </div>
 
-      {/* App shell */}
       <div className="relative mx-auto w-full max-w-5xl px-4 sm:px-6 py-8">
         {/* Header */}
         <header className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md px-4 sm:px-6 py-4">
@@ -423,7 +753,6 @@ function HomeInner() {
 
         {/* Content gate */}
         {connected && publicKey ? (
-          /* APP MODE */
           <section className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Left: Wallet */}
             <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5 sm:p-6">
@@ -435,7 +764,6 @@ function HomeInner() {
               </div>
 
               <div className="mt-4 rounded-xl border border-white/10 bg-black/40 p-4 space-y-4">
-                {/* Connected Wallet */}
                 <div className="text-center space-y-1">
                   <p className="text-sm text-zinc-400">Connected Wallet</p>
                   <p className="font-mono text-lg">
@@ -443,9 +771,7 @@ function HomeInner() {
                   </p>
                 </div>
 
-                {/* Balance section (USDC first / SOL secondary) */}
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
-                  {/* Available (USDC) */}
                   <div className="px-4 py-4 border-b border-white/10">
                     <div className="flex items-center justify-between gap-4">
                       <div>
@@ -478,7 +804,6 @@ function HomeInner() {
                     </div>
                   </div>
 
-                  {/* Network (SOL) */}
                   <div className="px-4 py-4">
                     <div className="flex items-center justify-between gap-4">
                       <div>
@@ -503,7 +828,6 @@ function HomeInner() {
                   </div>
                 </div>
 
-                {/* RECEIVE QR */}
                 <ReceiveQr className="mt-1" />
 
                 <button
@@ -583,7 +907,6 @@ function HomeInner() {
                         auto-filled
                       </div>
 
-                      {/* Payment-link QR toggle */}
                       <div className="mt-3 flex items-center gap-3">
                         <button
                           type="button"
@@ -615,7 +938,6 @@ function HomeInner() {
 
                 <label className="text-xs text-zinc-400">Recipient</label>
 
-                {/* ✅ Scanner panel lives HERE (above the row) so it never pushes left */}
                 {mounted ? (
                   <QrScanButton
                     mode="panel"
@@ -625,7 +947,6 @@ function HomeInner() {
                   />
                 ) : null}
 
-                {/* Recipient row */}
                 <div className="mt-2 mb-4 flex items-center gap-3">
                   <input
                     value={recipient}
@@ -639,17 +960,15 @@ function HomeInner() {
                     disabled={isBusy}
                   />
 
-                  {/* Clear recipient */}
                   <button
-  type="button"
-  onClick={() => setRecipient("")}
-  disabled={isBusy || !recipient.trim()}
-  className="uz-btn-clear"
-  title="Clear recipient"
->
-  Clear
-</button>
-
+                    type="button"
+                    onClick={() => setRecipient("")}
+                    disabled={isBusy || !recipient.trim()}
+                    className="uz-btn-clear"
+                    title="Clear recipient"
+                  >
+                    Clear
+                  </button>
 
                   {mounted ? (
                     <QrScanButton
@@ -665,7 +984,6 @@ function HomeInner() {
                   )}
                 </div>
 
-                {/* Selected contact label */}
                 {selectedContact ? (
                   <div className="mt-1 mb-3 text-xs text-zinc-400">
                     Selected contact:{" "}
@@ -778,8 +1096,19 @@ function HomeInner() {
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="Amount (USDC)"
-                  className="w-full mt-2 mb-4 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                  className="w-full mt-2 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
                   inputMode="decimal"
+                  disabled={isBusy}
+                />
+
+                <label className="mt-4 block text-xs text-zinc-400">
+                  Note (optional)
+                </label>
+                <input
+                  value={txNote}
+                  onChange={(e) => setTxNote(e.target.value)}
+                  placeholder='e.g., "Lunch"'
+                  className="w-full mt-2 mb-4 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
                   disabled={isBusy}
                 />
 
@@ -827,11 +1156,183 @@ function HomeInner() {
                     )}
                   </div>
                 )}
+
+                {/* RECEIPT HISTORY */}
+                <div className="mt-5 rounded-2xl border border-white/10 bg-black/30 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-white/10">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-white">
+                          Receipt History
+                        </div>
+                        <div className="mt-0.5 text-xs text-zinc-400">
+                          Last 10 (filtered) on this device
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={refreshReceiptsFromStorage}
+                          className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10"
+                        >
+                          Refresh
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={clearReceiptsHistory}
+                          disabled={receipts.length === 0}
+                          className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Clear receipt history on this device"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="text-xs text-zinc-400">Search</label>
+                        <input
+                          value={receiptSearch}
+                          onChange={(e) => setReceiptSearch(e.target.value)}
+                          placeholder="Search by address, tx, note…"
+                          className="w-full mt-2 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-1">
+                        <label className="text-xs text-zinc-400">Filter</label>
+                        <select
+                          value={receiptFilter}
+                          onChange={(e) =>
+                            setReceiptFilter(e.target.value as any)
+                          }
+                          className="w-full mt-2 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                        >
+                          <option value="all">All</option>
+                          <option value="confirmed">Confirmed</option>
+                          <option value="pending">Pending</option>
+                          <option value="failed">Failed</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {recentReceipts.length > 0 ? (
+                    <div className="divide-y divide-white/10">
+                      {recentReceipts.map((r) => {
+                        const amountPretty = receiptAmountPretty(r.amountUi);
+                        const toShort = shortMid(r.to, 7, 7);
+
+                        return (
+                          <div
+                            key={r.id}
+                            className="px-4 py-3 hover:bg-white/[0.04]"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span
+                                    className={[
+                                      "text-[11px] px-2 py-0.5 rounded-full border",
+                                      receiptBadgeClasses(r.status),
+                                    ].join(" ")}
+                                  >
+                                    {receiptStatusLabel(r.status)}
+                                  </span>
+
+                                  <div className="text-sm font-semibold text-white truncate">
+                                    {amountPretty}{" "}
+                                    <span className="text-white/60 font-semibold">
+                                      USDC
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="mt-1 text-xs text-zinc-400">
+                                  To:{" "}
+                                  <span className="font-mono text-zinc-200">
+                                    {toShort}
+                                  </span>
+                                  <span className="mx-2 text-zinc-600">•</span>
+                                  {fmtWhen(r.createdAt)}
+                                </div>
+
+                                {r.note ? (
+                                  <div className="mt-1 text-[11px] text-zinc-300">
+                                    Note:{" "}
+                                    <span className="text-white/80 font-semibold">
+                                      {r.note}
+                                    </span>
+                                  </div>
+                                ) : null}
+
+                                {r.sig ? (
+                                  <div className="mt-1 text-[11px] text-zinc-500 font-mono break-all">
+                                    Tx: {shortMid(r.sig, 10, 10)}
+                                  </div>
+                                ) : (
+                                  <div className="mt-1 text-[11px] text-zinc-500">
+                                    Tx: Pending signature…
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex flex-col gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveReceipt(r);
+                                    setShowReceipt(true);
+                                  }}
+                                  className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10"
+                                >
+                                  Open
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={!r.sig}
+                                  onClick={async () => {
+                                    if (!r.sig) return;
+                                    await copyText(r.sig);
+                                  }}
+                                  className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                  Copy Tx
+                                </button>
+
+                                <a
+                                  href={r.explorerUrl ?? "#"}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className={[
+                                    "rounded-lg px-3 py-2 text-xs text-center border",
+                                    r.explorerUrl
+                                      ? "bg-white text-black border-white/10 hover:opacity-90"
+                                      : "bg-white/10 text-white/40 border-white/10 pointer-events-none",
+                                  ].join(" ")}
+                                >
+                                  Explorer
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-4 text-sm text-zinc-400">
+                      No receipts match this search/filter yet.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </section>
         ) : (
-          /* LANDING MODE */
           <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-8 sm:p-10 text-center">
             <div className="text-xs text-zinc-400">UTILIZAP • Devnet Preview</div>
 
@@ -871,7 +1372,217 @@ function HomeInner() {
         </footer>
       </div>
 
-      {/* Complete ✓ pop animation (CSS only) */}
+      {/* RECEIPT MODAL */}
+      {showReceipt && activeReceipt && (
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/70"
+            onClick={() => setShowReceipt(false)}
+            aria-label="Close receipt"
+          />
+
+          <div className="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-6">
+            <div className="w-full sm:max-w-md">
+              <div className="rounded-t-3xl sm:rounded-2xl border border-white/10 bg-black/80 backdrop-blur-xl shadow-2xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-white">
+                      Transaction Receipt
+                    </div>
+                    <div className="mt-0.5 text-xs text-zinc-400">
+                      {fmtWhen(activeReceipt.createdAt)}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={[
+                        "text-[11px] px-2 py-1 rounded-full border",
+                        activeReceipt.status === "confirmed"
+                          ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                          : activeReceipt.status === "failed"
+                          ? "border-red-400/30 bg-red-400/10 text-red-200"
+                          : "border-white/10 bg-white/5 text-zinc-200",
+                      ].join(" ")}
+                    >
+                      {activeReceipt.status === "confirmed"
+                        ? "Confirmed"
+                        : activeReceipt.status === "failed"
+                        ? "Failed"
+                        : activeReceipt.status === "confirming"
+                        ? "Confirming"
+                        : "Submitted"}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowReceipt(false)}
+                      className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+
+                <div className="px-5 py-5">
+                  <div className="text-center">
+                    <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                      Amount
+                    </div>
+                    <div className="mt-2 text-4xl font-extrabold tracking-tight text-white">
+                      {receiptAmountDisplay}
+                      <span className="text-white/60 text-base font-semibold ml-2">
+                        {receiptTokenDisplay}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] overflow-hidden">
+                    <div className="px-4 py-3 border-b border-white/10">
+                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                        To
+                      </div>
+                      <div className="mt-1 text-sm text-white font-mono break-all">
+                        {activeReceipt.to
+                          ? shortMid(activeReceipt.to, 10, 10)
+                          : "—"}
+                      </div>
+                    </div>
+
+                    <div className="px-4 py-3 border-b border-white/10">
+                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                        From
+                      </div>
+                      <div className="mt-1 text-sm text-white font-mono break-all">
+                        {activeReceipt.from
+                          ? shortMid(activeReceipt.from, 10, 10)
+                          : "—"}
+                      </div>
+                    </div>
+
+                    <div className="px-4 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                            Transaction ID
+                          </div>
+                          <div className="mt-1 text-xs text-zinc-300 font-mono break-all">
+                            {activeReceipt.sig
+                              ? shortMid(activeReceipt.sig, 12, 12)
+                              : "Pending signature…"}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={!activeReceipt.sig}
+                          onClick={async () => {
+                            if (!activeReceipt.sig) return;
+                            const ok = await copyText(activeReceipt.sig);
+                            if (ok) {
+                              setSigCopied(true);
+                              window.setTimeout(() => setSigCopied(false), 1200);
+                            }
+                          }}
+                          className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {sigCopied ? "Copied ✓" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notes */}
+                  <div className="mt-4">
+                    <label className="text-xs text-zinc-400">Note</label>
+                    <textarea
+                      value={receiptNoteDraft}
+                      onChange={(e) => setReceiptNoteDraft(e.target.value)}
+                      placeholder='e.g., "Lunch", "Gas", "Invoice #124"'
+                      className="w-full mt-2 rounded-xl bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20 min-h-[86px]"
+                    />
+
+                    <div className="mt-2 flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateReceiptNote(activeReceipt.id, receiptNoteDraft);
+                          setNoteSavedTick(true);
+                          window.setTimeout(() => setNoteSavedTick(false), 1200);
+                        }}
+                        className="rounded-xl px-4 py-3 text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10"
+                      >
+                        {noteSavedTick ? "Saved ✓" : "Save Note"}
+                      </button>
+
+                      <span className="text-[11px] text-zinc-500">
+                        Notes save locally (this device)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const text = activeReceipt.explorerUrl ?? "";
+                        if (!text) return;
+                        const ok = await copyText(text);
+                        if (ok) {
+                          setReceiptCopied(true);
+                          window.setTimeout(
+                            () => setReceiptCopied(false),
+                            1200
+                          );
+                        }
+                      }}
+                      disabled={!activeReceipt.explorerUrl}
+                      className="rounded-xl px-4 py-3 text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {receiptCopied ? "Link Copied ✓" : "Copy Link"}
+                    </button>
+
+                    <a
+                      href={activeReceipt.explorerUrl ?? "#"}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={[
+                        "rounded-xl px-4 py-3 text-sm font-semibold text-center",
+                        activeReceipt.explorerUrl
+                          ? "bg-white text-black hover:opacity-90"
+                          : "bg-white/10 text-white/40 pointer-events-none",
+                      ].join(" ")}
+                    >
+                      View on Explorer
+                    </a>
+                  </div>
+
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={resetForNewPayment}
+                      className="w-full rounded-xl px-4 py-3 text-sm font-semibold bg-emerald-500/20 border border-emerald-400/30 text-emerald-100 hover:bg-emerald-500/25"
+                    >
+                      New Payment
+                    </button>
+                  </div>
+
+                  <div className="mt-4 text-center text-[11px] text-zinc-500">
+                    UTILIZAP • {activeReceipt.cluster}
+                  </div>
+                </div>
+
+                <div className="sm:hidden pb-3">
+                  <div className="mx-auto h-1.5 w-12 rounded-full bg-white/15" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Complete ✓ pop animation */}
       <style jsx>{`
         @keyframes uzCompletePop {
           0% {
