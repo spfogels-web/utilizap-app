@@ -121,52 +121,33 @@ export default function QrScanButton({
 
   if (!canUse) return null;
 
-  // ✅ BUTTON MODE (Scan pill) — matches theme + QR-looking SVG icon
-  if (mode === "button") {
-    return (
-      <button
-        type="button"
-        className="uz-scan-pill uz-btn-secondary"
-        disabled={disabled}
-        onClick={() => {
-          if (disabled) return;
-          setErr(null);
-          emitToggle(true);
-        }}
-        aria-label="Scan QR"
-        title="Scan QR"
-      >
-        <span className="uz-scan-icon" aria-hidden="true">
-          <svg
-            viewBox="0 0 24 24"
-            width="16"
-            height="16"
-            aria-hidden="true"
-            focusable="false"
-          >
-            {/* Finder squares */}
-            <rect x="2" y="2" width="7" height="7" rx="1" fill="#000" />
-            <rect x="4" y="4" width="3" height="3" rx="0.5" fill="#fff" />
+ // ✅ BUTTON MODE — compact, single-line fit
+if (mode === "button") {
+  return (
+    <button
+      type="button"
+      className="
+        uz-btn-secondary
+        px-3 py-1.5
+        text-[11px]
+        leading-none
+        rounded-full
+        whitespace-nowrap
+      "
+      disabled={disabled}
+      onClick={() => {
+        if (disabled) return;
+        setErr(null);
+        emitToggle(true);
+      }}
+      aria-label="QR Scan"
+      title="QR Scan"
+    >
+      QR SCAN
+    </button>
+  );
+}
 
-            <rect x="15" y="2" width="7" height="7" rx="1" fill="#000" />
-            <rect x="17" y="4" width="3" height="3" rx="0.5" fill="#fff" />
-
-            <rect x="2" y="15" width="7" height="7" rx="1" fill="#000" />
-            <rect x="4" y="17" width="3" height="3" rx="0.5" fill="#fff" />
-
-            {/* QR “data” blocks */}
-            <rect x="11" y="11" width="2" height="2" rx="0.4" fill="#000" />
-            <rect x="14" y="11" width="2" height="2" rx="0.4" fill="#000" />
-            <rect x="11" y="14" width="2" height="2" rx="0.4" fill="#000" />
-            <rect x="16" y="14" width="2" height="2" rx="0.4" fill="#000" />
-            <rect x="14" y="16" width="2" height="2" rx="0.4" fill="#000" />
-          </svg>
-        </span>
-
-        <span className="uz-scan-text">Scan</span>
-      </button>
-    );
-  }
 
   // ✅ PANEL MODE (only renders when open)
   if (!open) return null;

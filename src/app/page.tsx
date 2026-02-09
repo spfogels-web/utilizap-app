@@ -2,19 +2,37 @@
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { PublicKey } from "@solana/web3.js";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import {
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  LAMPORTS_PER_SOL,
+} from "@solana/web3.js";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import QRCode from "qrcode";
 
 import { getSolBalance, getSplTokenBalance } from "./lib/balances";
 import { sendUsdcDevnet, isValidSolanaAddress } from "./lib/transfer";
+import { heliusAddressTransactions } from "./lib/helius";
 
 import QrScanButton from "./components/QrScanButton";
 import ReceiveQr from "./components/ReceiveQr";
 
+/**
+ * ✅ Devnet USDC mint (Helius tokenTransfers uses mint address)
+ * This is standard for Solana devnet USDC.
+ */
+const USDC_MINT_DEVNET = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
 function shortAddr(address: string) {
   return address.slice(0, 4) + "..." + address.slice(-4);
+}
+
+function shortMid(s: string, head = 6, tail = 6) {
+  if (!s) return "—";
+  if (s.length <= head + tail + 3) return s;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
 }
 
 type TxStage =
@@ -26,9 +44,10 @@ type TxStage =
   | "failed";
 
 // --------------------
-// RECEIPTS (local-only)
+// RECEIPTS (local + helius)
 // --------------------
 type TxReceiptStatus = "submitted" | "confirming" | "confirmed" | "failed";
+type TxReceiptDirection = "sent" | "received";
 
 type TxReceipt = {
   id: string;
@@ -37,6 +56,8 @@ type TxReceipt = {
 
   cluster: "devnet" | "mainnet-beta";
   status: TxReceiptStatus;
+
+  direction: TxReceiptDirection;
 
   amountUi: string;
   tokenSymbol: "USDC";
@@ -48,7 +69,7 @@ type TxReceipt = {
   note?: string;
 };
 
-const RECEIPTS_KEY = "uz_receipts_v1";
+const RECEIPTS_KEY = "uz_receipts_v2";
 
 function ensureReceiptsStore() {
   if (typeof window === "undefined") return;
@@ -65,6 +86,7 @@ function safeParseReceipts(raw: string | null): TxReceipt[] {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
+
     return parsed
       .filter(
         (r) =>
@@ -82,19 +104,27 @@ function safeParseReceipts(raw: string | null): TxReceipt[] {
           typeof r.from === "string" &&
           typeof r.to === "string"
       )
-      .map((r) => ({
-        id: r.id,
-        sig: r.sig ?? null,
-        createdAt: r.createdAt,
-        cluster: r.cluster,
-        status: r.status,
-        amountUi: String(r.amountUi ?? "").trim(),
-        tokenSymbol: "USDC" as const,
-        from: String(r.from ?? "").trim(),
-        to: String(r.to ?? "").trim(),
-        explorerUrl: typeof r.explorerUrl === "string" ? r.explorerUrl : null,
-        note: typeof r.note === "string" ? r.note : undefined,
-      }));
+      .map((r) => {
+        const dir: TxReceiptDirection =
+          r.direction === "received" || r.direction === "sent"
+            ? r.direction
+            : "sent";
+
+        return {
+          id: r.id,
+          sig: r.sig ?? null,
+          createdAt: r.createdAt,
+          cluster: r.cluster,
+          status: r.status,
+          direction: dir,
+          amountUi: String(r.amountUi ?? "").trim(),
+          tokenSymbol: "USDC" as const,
+          from: String(r.from ?? "").trim(),
+          to: String(r.to ?? "").trim(),
+          explorerUrl: typeof r.explorerUrl === "string" ? r.explorerUrl : null,
+          note: typeof r.note === "string" ? r.note : undefined,
+        };
+      });
   } catch {
     return [];
   }
@@ -194,6 +224,13 @@ function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
+// ✅ FIX: Helius Enhanced tx objects don't guarantee `err` exists on your `HeliusTx` type.
+// So we safely read error flags using `any` and a few common shapes.
+function heliusHasError(tx: unknown): boolean {
+  const t = tx as any;
+  return Boolean(t?.transactionError || t?.err || t?.meta?.err);
+}
+
 function HomeInner() {
   const { connection } = useConnection();
   const { publicKey, connected, signTransaction, disconnect } = useWallet();
@@ -219,7 +256,6 @@ function HomeInner() {
   const [receiptCopied, setReceiptCopied] = useState(false);
   const [sigCopied, setSigCopied] = useState(false);
 
-  // ✅ FIXED: no ": any" here
   const [receiptNoteDraft, setReceiptNoteDraft] = useState<string>("");
   const [noteSavedTick, setNoteSavedTick] = useState(false);
 
@@ -229,9 +265,25 @@ function HomeInner() {
     "all" | "confirmed" | "pending" | "failed"
   >("all");
 
+  const [receiptTab, setReceiptTab] = useState<"all" | "sent" | "received">(
+    "all"
+  );
+
+  const [isHeliusSyncing, setIsHeliusSyncing] = useState(false);
+  const lastHeliusSyncRef = useRef<string>("");
+
   // Contacts
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactName, setContactName] = useState("");
+
+  // --------------------
+  // ✅ PREVIEW TRANSACTION (before Phantom)
+  // --------------------
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewAck, setPreviewAck] = useState(false);
+  const [previewFeeText, setPreviewFeeText] = useState<string>("—");
+  const [previewFeeLoading, setPreviewFeeLoading] = useState(false);
+  const [previewWarn, setPreviewWarn] = useState<string | null>(null);
 
   const explorerUrl = txSig
     ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
@@ -249,12 +301,6 @@ function HomeInner() {
     }
   }
 
-  function shortMid(s: string, head = 6, tail = 6) {
-    if (!s) return "—";
-    if (s.length <= head + tail + 3) return s;
-    return `${s.slice(0, head)}…${s.slice(-tail)}`;
-  }
-
   async function copyText(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -265,8 +311,7 @@ function HomeInner() {
   }
 
   function refreshReceiptsFromStorage() {
-    const latest = loadReceipts();
-    setReceipts(latest);
+    setReceipts(loadReceipts());
   }
 
   function clearReceiptsHistory() {
@@ -308,6 +353,13 @@ function HomeInner() {
     setSigCopied(false);
     setReceiptNoteDraft("");
     setNoteSavedTick(false);
+
+    // preview reset
+    setShowPreview(false);
+    setPreviewAck(false);
+    setPreviewFeeText("—");
+    setPreviewFeeLoading(false);
+    setPreviewWarn(null);
   }
 
   const receiptAmountDisplay = useMemo(() => {
@@ -444,15 +496,13 @@ function HomeInner() {
 
   // Load contacts
   useEffect(() => {
-    const initial = loadContacts();
-    setContacts(initial);
+    setContacts(loadContacts());
   }, []);
 
   // Init + load receipts
   useEffect(() => {
     ensureReceiptsStore();
-    const initial = loadReceipts();
-    setReceipts(initial);
+    setReceipts(loadReceipts());
   }, []);
 
   // Keep note draft in sync when opening receipt
@@ -468,10 +518,7 @@ function HomeInner() {
   // Auto-open receipt when confirmed/failed
   useEffect(() => {
     if (!activeReceipt) return;
-    if (
-      activeReceipt.status === "confirmed" ||
-      activeReceipt.status === "failed"
-    ) {
+    if (activeReceipt.status === "confirmed" || activeReceipt.status === "failed") {
       setShowReceipt(true);
     }
   }, [activeReceipt]);
@@ -521,6 +568,12 @@ function HomeInner() {
     return "border-white/10 bg-white/5 text-zinc-300";
   }
 
+  function directionBadgeClasses(direction: TxReceiptDirection) {
+    if (direction === "received")
+      return "border-sky-400/30 bg-sky-400/10 text-sky-200";
+    return "border-amber-400/30 bg-amber-400/10 text-amber-200";
+  }
+
   function receiptStatusLabel(status: TxReceiptStatus) {
     if (status === "confirmed") return "Confirmed";
     if (status === "failed") return "Failed";
@@ -535,6 +588,170 @@ function HomeInner() {
     return s || "—";
   }
 
+  /**
+   * ✅ Helius import:
+   * Pull last N txs and create receipts for USDC token transfers.
+   */
+  async function syncHeliusUsdcReceipts(walletAddr: string) {
+    if (!walletAddr) return;
+
+    const syncKey = `${walletAddr}`;
+    if (lastHeliusSyncRef.current === syncKey) return;
+
+    setIsHeliusSyncing(true);
+    lastHeliusSyncRef.current = syncKey;
+
+    try {
+      const txs = await heliusAddressTransactions(walletAddr, { limit: 80 });
+      const walletLower = walletAddr.toLowerCase();
+      const mint = USDC_MINT_DEVNET;
+
+      const bySig = new Map<string, TxReceipt>();
+
+      for (const tx of Array.isArray(txs) ? txs : []) {
+        const sig: string | undefined = (tx as any)?.signature;
+        if (!sig) continue;
+
+        const tokenTransfers = (tx as any)?.tokenTransfers || [];
+        if (!Array.isArray(tokenTransfers) || tokenTransfers.length === 0)
+          continue;
+
+        // NET relative to wallet: + received, - sent
+        let net = 0;
+        let involved = false;
+
+        let bestFrom = "";
+        let bestTo = "";
+
+        for (const t of tokenTransfers) {
+          if (!t?.mint || String(t.mint) !== mint) continue;
+
+          const raw = (t as any)?.tokenAmount ?? (t as any)?.amount ?? 0;
+
+          let amt = 0;
+
+          if (typeof raw === "number") amt = raw;
+          else if (typeof raw === "string") amt = Number(raw);
+          else if (raw && typeof raw === "object") {
+            // Helius commonly returns tokenAmount as an object
+            if (typeof raw.uiAmount === "number") amt = raw.uiAmount;
+            else if (typeof raw.uiAmountString === "string")
+              amt = Number(raw.uiAmountString);
+            else if (typeof raw.amount === "string") {
+              const decimals = typeof raw.decimals === "number" ? raw.decimals : 0;
+              const intVal = Number(raw.amount);
+              if (Number.isFinite(intVal)) amt = intVal / Math.pow(10, decimals);
+            }
+          }
+
+          if (!Number.isFinite(amt) || amt <= 0) continue;
+
+          const fromAny = String(
+            t?.fromUserAccount || t?.fromAccount || t?.fromTokenAccount || ""
+          ).toLowerCase();
+
+          const toAny = String(
+            t?.toUserAccount || t?.toAccount || t?.toTokenAccount || ""
+          ).toLowerCase();
+
+          const looksOut = fromAny === walletLower;
+          const looksIn = toAny === walletLower;
+
+          if (looksIn || looksOut) involved = true;
+
+          if (looksIn) {
+            net += amt;
+            bestFrom = String(
+              t?.fromUserAccount || t?.fromAccount || t?.fromTokenAccount || ""
+            );
+            bestTo = walletAddr;
+          } else if (looksOut) {
+            net -= amt;
+            bestFrom = walletAddr;
+            bestTo = String(
+              t?.toUserAccount || t?.toAccount || t?.toTokenAccount || ""
+            );
+          } else {
+            // fallback: show it as received
+            involved = true;
+            net += amt;
+            bestFrom = String(
+              t?.fromUserAccount || t?.fromAccount || t?.fromTokenAccount || ""
+            );
+            bestTo = walletAddr;
+          }
+        }
+
+        if (!involved) continue;
+
+        const direction: TxReceiptDirection = net >= 0 ? "received" : "sent";
+        const amountAbs = Math.abs(net);
+
+        const tsSeconds =
+          (tx as any)?.timestamp ?? (tx as any)?.blockTime ?? null;
+
+        const createdAt =
+          typeof tsSeconds === "number" && tsSeconds > 0
+            ? tsSeconds * 1000
+            : Date.now();
+
+        const status: TxReceiptStatus = heliusHasError(tx)
+          ? "failed"
+          : "confirmed";
+
+        const id = `h_${sig}`;
+
+        const r: TxReceipt = {
+          id,
+          sig,
+          createdAt,
+          cluster: "devnet",
+          status,
+          direction,
+          amountUi: String(Number.isFinite(amountAbs) ? amountAbs : 0),
+          tokenSymbol: "USDC",
+          from: direction === "received" ? bestFrom || "" : walletAddr,
+          to: direction === "received" ? walletAddr : bestTo || "",
+          explorerUrl: `https://explorer.solana.com/tx/${sig}?cluster=devnet`,
+        };
+
+        bySig.set(sig, r);
+      }
+
+      if (bySig.size === 0) return;
+
+      const existing = loadReceipts();
+      const existingById = new Map(existing.map((r) => [r.id, r]));
+
+      for (const r of bySig.values()) {
+        const prev = existingById.get(r.id);
+        const merged: TxReceipt = prev?.note ? { ...r, note: prev.note } : r;
+        upsertReceipt(merged);
+      }
+
+      setReceipts(loadReceipts());
+    } catch (e) {
+      console.error("Helius sync failed:", e);
+    } finally {
+      setIsHeliusSyncing(false);
+    }
+  }
+
+  // Auto-sync once per wallet connect (wrapped so UI never blanks)
+  useEffect(() => {
+    if (!publicKey || !connected) return;
+
+    (async () => {
+      try {
+        await syncHeliusUsdcReceipts(publicKey.toBase58());
+      } catch (err) {
+        console.error("Helius sync failed (effect):", err);
+      }
+    })();
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publicKey, connected]);
+
   const filteredReceipts = useMemo(() => {
     const q = receiptSearch.trim().toLowerCase();
 
@@ -542,8 +759,12 @@ function HomeInner() {
       if (receiptFilter === "all") return true;
       if (receiptFilter === "confirmed") return r.status === "confirmed";
       if (receiptFilter === "failed") return r.status === "failed";
-      // pending
       return r.status === "submitted" || r.status === "confirming";
+    }
+
+    function matchesTab(r: TxReceipt) {
+      if (receiptTab === "all") return true;
+      return r.direction === receiptTab;
     }
 
     function matchesQuery(r: TxReceipt) {
@@ -555,14 +776,17 @@ function HomeInner() {
         r.amountUi,
         r.note ?? "",
         r.status,
+        r.direction,
       ]
         .join(" ")
         .toLowerCase();
       return hay.includes(q);
     }
 
-    return receipts.filter((r) => matchesFilter(r) && matchesQuery(r));
-  }, [receipts, receiptSearch, receiptFilter]);
+    return receipts.filter(
+      (r) => matchesFilter(r) && matchesTab(r) && matchesQuery(r)
+    );
+  }, [receipts, receiptSearch, receiptFilter, receiptTab]);
 
   const recentReceipts = useMemo(
     () => filteredReceipts.slice(0, 10),
@@ -582,6 +806,7 @@ function HomeInner() {
       createdAt: Date.now(),
       cluster: "devnet",
       status: "submitted",
+      direction: "sent",
       amountUi,
       tokenSymbol: "USDC",
       from,
@@ -641,6 +866,9 @@ function HomeInner() {
 
       setTxStage("confirmed");
       refreshBalances();
+
+      // Allow a re-sync later
+      lastHeliusSyncRef.current = "";
     } catch (e: any) {
       setTxStage("failed");
       setTxError(e?.message ?? "Send failed");
@@ -670,7 +898,6 @@ function HomeInner() {
   const usdcCash = usdcBalance === null ? "—" : formatUsd(usdcBalance);
   const solPrecise = solBalance === null ? "—" : solBalance.toFixed(4);
 
-  // CONTACTS helpers
   function chooseContact(address: string) {
     setRecipient(address);
   }
@@ -703,6 +930,120 @@ function HomeInner() {
     });
 
     setContactName("");
+  }
+
+  const modalTitle = useMemo(() => {
+    if (!activeReceipt) return "Transaction Receipt";
+    return activeReceipt.direction === "received"
+      ? "Payment Received"
+      : "Payment Sent";
+  }, [activeReceipt]);
+
+  const modalAccent = useMemo(() => {
+    if (!activeReceipt) return "border-white/10 bg-white/5 text-zinc-200";
+    return activeReceipt.direction === "received"
+      ? "border-sky-400/30 bg-sky-400/10 text-sky-200"
+      : "border-amber-400/30 bg-amber-400/10 text-amber-200";
+  }, [activeReceipt]);
+
+  // --------------------
+  // ✅ PREVIEW helpers
+  // --------------------
+  const previewTo = useMemo(() => recipient.trim(), [recipient]);
+  const previewFrom = useMemo(() => publicKey?.toBase58() ?? "", [publicKey]);
+  const previewAmountPretty = useMemo(() => {
+    const n = Number(amount);
+    if (Number.isFinite(n) && n > 0) return formatUsd(n);
+    return amount?.trim() ? amount.trim() : "—";
+  }, [amount]);
+
+  function openPreview() {
+    setPreviewWarn(null);
+
+    // hard guard
+    if (!canSend || isBusy) return;
+
+    // sanity warnings
+    try {
+      const from = previewFrom.trim();
+      const to = previewTo.trim();
+      if (from && to && from.toLowerCase() === to.toLowerCase()) {
+        setPreviewWarn("You are sending to your own wallet address.");
+      } else {
+        setPreviewWarn(null);
+      }
+    } catch {
+      setPreviewWarn(null);
+    }
+
+    setPreviewAck(false);
+    setPreviewFeeText("—");
+    setShowPreview(true);
+  }
+
+  async function estimateNetworkFee(): Promise<string> {
+    try {
+      if (!publicKey) return "—";
+      // Best-effort estimate (not exact for SPL USDC, but close enough for a user preview)
+      const { blockhash } = await connection.getLatestBlockhash("finalized");
+      const tx = new Transaction({
+        feePayer: publicKey,
+        recentBlockhash: blockhash,
+      });
+      // 0-lamport self transfer (fee estimate only)
+      tx.add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: publicKey,
+          lamports: 0,
+        })
+      );
+
+      const msg = tx.compileMessage();
+      const feeLamports = await connection.getFeeForMessage(msg, "confirmed");
+      const lamports =
+        typeof feeLamports?.value === "number" ? feeLamports.value : null;
+
+      if (lamports === null) return "—";
+
+      const sol = lamports / LAMPORTS_PER_SOL;
+      const pretty = sol === 0 ? "0" : sol < 0.0001 ? sol.toFixed(6) : sol.toFixed(4);
+      return `${pretty} SOL (est.)`;
+    } catch {
+      return "—";
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      if (!showPreview) return;
+      if (!publicKey) return;
+
+      setPreviewFeeLoading(true);
+      const fee = await estimateNetworkFee();
+      if (!cancelled) {
+        setPreviewFeeText(fee);
+        setPreviewFeeLoading(false);
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPreview, publicKey]);
+
+  async function continueToPhantom() {
+    if (!previewAck) return;
+    setShowPreview(false);
+
+    // tiny delay so modal closes cleanly before Phantom pops
+    window.setTimeout(() => {
+      onSendUsdc();
+    }, 30);
   }
 
   return (
@@ -784,9 +1125,7 @@ function HomeInner() {
                             USDC
                           </span>
                         </p>
-                        <p className="mt-1 text-sm text-zinc-500">
-                          Ready to send
-                        </p>
+                        <p className="mt-1 text-sm text-zinc-500">Ready to send</p>
                       </div>
 
                       <div
@@ -812,9 +1151,7 @@ function HomeInner() {
                         </p>
                         <p className="mt-1 text-lg font-bold text-white">
                           {solPrecise}{" "}
-                          <span className="text-white/60 font-semibold">
-                            SOL
-                          </span>
+                          <span className="text-white/60 font-semibold">SOL</span>
                         </p>
                         <p className="mt-1 text-sm text-zinc-500">
                           Used for network fees
@@ -901,9 +1238,7 @@ function HomeInner() {
 
                       <div className="mt-2 text-[11px] text-zinc-500">
                         Opens:{" "}
-                        <span className="text-zinc-300">
-                          Recipient + Amount
-                        </span>{" "}
+                        <span className="text-zinc-300">Recipient + Amount</span>{" "}
                         auto-filled
                       </div>
 
@@ -960,6 +1295,7 @@ function HomeInner() {
                     disabled={isBusy}
                   />
 
+                  {/* ✅ KEEP THIS CLEAR BUTTON EXACTLY AS YOU LIKE IT */}
                   <button
                     type="button"
                     onClick={() => setRecipient("")}
@@ -1112,8 +1448,9 @@ function HomeInner() {
                   disabled={isBusy}
                 />
 
+                {/* ✅ CHANGED: button opens Preview instead of Phantom immediately */}
                 <button
-                  onClick={onSendUsdc}
+                  onClick={openPreview}
                   disabled={!canSend || isBusy}
                   className={[
                     "uz-primary-btn w-full rounded-xl py-3 font-semibold text-white disabled:cursor-not-allowed",
@@ -1126,7 +1463,7 @@ function HomeInner() {
                     ? "Complete ✓"
                     : isBusy
                     ? "Processing…"
-                    : "Send USDC"}
+                    : "Preview Transaction"}
                 </button>
 
                 {txStage === "signing" && (
@@ -1166,17 +1503,30 @@ function HomeInner() {
                           Receipt History
                         </div>
                         <div className="mt-0.5 text-xs text-zinc-400">
-                          Last 10 (filtered) on this device
+                          Last 10 (filtered) • Local + Helius imported
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={refreshReceiptsFromStorage}
+                          onClick={async () => {
+                            lastHeliusSyncRef.current = "";
+                            if (publicKey?.toBase58()) {
+                              try {
+                                await syncHeliusUsdcReceipts(publicKey.toBase58());
+                              } catch (e) {
+                                console.error(
+                                  "Helius sync failed (manual refresh):",
+                                  e
+                                );
+                              }
+                            }
+                            refreshReceiptsFromStorage();
+                          }}
                           className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10"
                         >
-                          Refresh
+                          {isHeliusSyncing ? "Syncing…" : "Refresh"}
                         </button>
 
                         <button
@@ -1189,6 +1539,46 @@ function HomeInner() {
                           Clear
                         </button>
                       </div>
+                    </div>
+
+                    {/* Tabs */}
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setReceiptTab("all")}
+                        className={[
+                          "rounded-lg px-3 py-2 text-xs border",
+                          receiptTab === "all"
+                            ? "bg-white text-black border-white/10"
+                            : "bg-white/5 border-white/10 hover:bg-white/10 text-zinc-200",
+                        ].join(" ")}
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReceiptTab("sent")}
+                        className={[
+                          "rounded-lg px-3 py-2 text-xs border",
+                          receiptTab === "sent"
+                            ? "bg-white text-black border-white/10"
+                            : "bg-white/5 border-white/10 hover:bg-white/10 text-zinc-200",
+                        ].join(" ")}
+                      >
+                        Sent
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReceiptTab("received")}
+                        className={[
+                          "rounded-lg px-3 py-2 text-xs border",
+                          receiptTab === "received"
+                            ? "bg-white text-black border-white/10"
+                            : "bg-white/5 border-white/10 hover:bg-white/10 text-zinc-200",
+                        ].join(" ")}
+                      >
+                        Received
+                      </button>
                     </div>
 
                     <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1221,19 +1611,20 @@ function HomeInner() {
                   </div>
 
                   {recentReceipts.length > 0 ? (
-                    <div className="divide-y divide-white/10">
+                    <div className="p-3 space-y-3">
                       {recentReceipts.map((r) => {
                         const amountPretty = receiptAmountPretty(r.amountUi);
                         const toShort = shortMid(r.to, 7, 7);
+                        const fromShort = shortMid(r.from, 7, 7);
 
                         return (
                           <div
                             key={r.id}
-                            className="px-4 py-3 hover:bg-white/[0.04]"
+                            className="uz-receipt__tile px-4 py-3"
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <div className="flex items-center gap-2 min-w-0">
+                                <div className="flex items-center gap-2 min-w-0 flex-wrap">
                                   <span
                                     className={[
                                       "text-[11px] px-2 py-0.5 rounded-full border",
@@ -1243,7 +1634,18 @@ function HomeInner() {
                                     {receiptStatusLabel(r.status)}
                                   </span>
 
-                                  <div className="text-sm font-semibold text-white truncate">
+                                  <span
+                                    className={[
+                                      "text-[11px] px-2 py-0.5 rounded-full border",
+                                      directionBadgeClasses(r.direction),
+                                    ].join(" ")}
+                                  >
+                                    {r.direction === "received"
+                                      ? "Received"
+                                      : "Sent"}
+                                  </span>
+
+                                  <div className="text-sm font-semibold text-white truncate uz-receipt__amount">
                                     {amountPretty}{" "}
                                     <span className="text-white/60 font-semibold">
                                       USDC
@@ -1252,10 +1654,21 @@ function HomeInner() {
                                 </div>
 
                                 <div className="mt-1 text-xs text-zinc-400">
-                                  To:{" "}
-                                  <span className="font-mono text-zinc-200">
-                                    {toShort}
-                                  </span>
+                                  {r.direction === "received" ? (
+                                    <>
+                                      From:{" "}
+                                      <span className="font-mono text-zinc-200">
+                                        {fromShort}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      To:{" "}
+                                      <span className="font-mono text-zinc-200">
+                                        {toShort}
+                                      </span>
+                                    </>
+                                  )}
                                   <span className="mx-2 text-zinc-600">•</span>
                                   {fmtWhen(r.createdAt)}
                                 </div>
@@ -1338,9 +1751,7 @@ function HomeInner() {
 
             <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight">
               Venmo-style USDC payments,
-              <span className="block text-zinc-200">
-                Non-custodial. Instant.
-              </span>
+              <span className="block text-zinc-200">Non-custodial. Instant.</span>
             </h1>
 
             <p className="mt-4 max-w-2xl mx-auto text-sm sm:text-base text-zinc-300">
@@ -1372,7 +1783,186 @@ function HomeInner() {
         </footer>
       </div>
 
-      {/* RECEIPT MODAL */}
+      {/* ✅ PREVIEW MODAL (BEFORE PHANTOM) — NOW WIRED TO .uz-preview__* */}
+      {showPreview && (
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="absolute inset-0 uz-preview__backdrop"
+            onClick={() => setShowPreview(false)}
+            aria-label="Close preview"
+          />
+
+          <div className="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-6">
+            <div className="w-full sm:max-w-md">
+              <div className="uz-preview__ring">
+                <div className="uz-preview__surface rounded-t-3xl sm:rounded-2xl overflow-hidden">
+                  <div className="uz-preview__header px-5 py-4 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white">
+                        Preview Transaction
+                      </div>
+                      <div className="mt-0.5 text-xs text-zinc-300/80">
+                        Confirm details before Phantom opens
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPreview(false)}
+                      className="uz-preview__secondary rounded-lg px-3 py-2 text-xs"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="px-5 py-5">
+                    <div className="text-center">
+                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                        Amount
+                      </div>
+                      <div className="mt-2 text-4xl font-extrabold tracking-tight text-white uz-preview__amount">
+                        {previewAmountPretty}
+                        <span className="text-white/60 text-base font-semibold ml-2">
+                          USDC
+                        </span>
+                      </div>
+                    </div>
+
+                    {selectedContact?.name ? (
+                      <div className="mt-3 text-center text-xs text-zinc-300/80">
+                        Paying{" "}
+                        <span className="text-white/90 font-semibold">
+                          {selectedContact.name}
+                        </span>
+                      </div>
+                    ) : null}
+
+                    {/* chips row */}
+                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                      <span className="uz-preview__chip">
+                        <span className="uz-preview__dot" />
+                        Devnet
+                      </span>
+                      <span className="uz-preview__chip">
+                        <span className="uz-preview__dot" />
+                        USDC
+                      </span>
+                      <span className="uz-preview__chip">
+                        <span className="uz-preview__dot" />
+                        Non-custodial
+                      </span>
+                    </div>
+
+                    {previewWarn ? (
+                      <div className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
+                        {previewWarn}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-5 rounded-2xl overflow-hidden uz-preview__panel">
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                          To
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {previewTo ? shortMid(previewTo, 10, 10) : "—"}
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                          From
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {previewFrom ? shortMid(previewFrom, 10, 10) : "—"}
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                          Network
+                        </div>
+                        <div className="mt-1 text-sm text-white">Solana Devnet</div>
+                      </div>
+
+                      <div className="px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                              Estimated Fee
+                            </div>
+                            <div className="mt-1 text-sm text-white">
+                              {previewFeeLoading ? "Calculating…" : previewFeeText}
+                            </div>
+                          </div>
+
+                          <span className="uz-preview__chip">Est.</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {txNote.trim() ? (
+                      <div className="mt-4 rounded-2xl px-4 py-3 uz-preview__panel">
+                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                          Note
+                        </div>
+                        <div className="mt-1 text-sm text-zinc-200">
+                          {txNote.trim()}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 rounded-2xl px-4 py-3 uz-preview__panel">
+                      <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={previewAck}
+                          onChange={(e) => setPreviewAck(e.target.checked)}
+                          className="mt-0.5"
+                        />
+                        <span className="text-xs text-zinc-200">
+                          I confirm the recipient and amount are correct. I understand
+                          blockchain transactions are typically irreversible.
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowPreview(false)}
+                        className="uz-preview__secondary rounded-xl px-4 py-3 text-sm font-semibold"
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={continueToPhantom}
+                        disabled={!previewAck || isBusy || !canSend}
+                        className="uz-preview__primary rounded-xl px-4 py-3 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Continue to Phantom →
+                      </button>
+                    </div>
+
+                    <div className="mt-4 text-center text-[11px] text-zinc-400/70">
+                      UTILIZAP • Preview step
+                    </div>
+                  </div>
+
+                  <div className="sm:hidden pb-3">
+                    <div className="mx-auto h-1.5 w-12 rounded-full bg-white/15" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECEIPT MODAL — NOW WIRED TO .uz-receipt__* */}
       {showReceipt && activeReceipt && (
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
           <button
@@ -1384,197 +1974,205 @@ function HomeInner() {
 
           <div className="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-6">
             <div className="w-full sm:max-w-md">
-              <div className="rounded-t-3xl sm:rounded-2xl border border-white/10 bg-black/80 backdrop-blur-xl shadow-2xl overflow-hidden">
-                <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-white">
-                      Transaction Receipt
+              <div className="uz-receipt__modalRing">
+                <div className="uz-receipt__modalSurface rounded-t-3xl sm:rounded-2xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white">
+                        {modalTitle}
+                      </div>
+                      <div className="mt-0.5 text-xs text-zinc-400">
+                        {fmtWhen(activeReceipt.createdAt)}
+                      </div>
                     </div>
-                    <div className="mt-0.5 text-xs text-zinc-400">
-                      {fmtWhen(activeReceipt.createdAt)}
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={[
-                        "text-[11px] px-2 py-1 rounded-full border",
-                        activeReceipt.status === "confirmed"
-                          ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={[
+                          "text-[11px] px-2 py-1 rounded-full border",
+                          activeReceipt.status === "confirmed"
+                            ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                            : activeReceipt.status === "failed"
+                            ? "border-red-400/30 bg-red-400/10 text-red-200"
+                            : "border-white/10 bg-white/5 text-zinc-200",
+                        ].join(" ")}
+                      >
+                        {activeReceipt.status === "confirmed"
+                          ? "Confirmed"
                           : activeReceipt.status === "failed"
-                          ? "border-red-400/30 bg-red-400/10 text-red-200"
-                          : "border-white/10 bg-white/5 text-zinc-200",
-                      ].join(" ")}
-                    >
-                      {activeReceipt.status === "confirmed"
-                        ? "Confirmed"
-                        : activeReceipt.status === "failed"
-                        ? "Failed"
-                        : activeReceipt.status === "confirming"
-                        ? "Confirming"
-                        : "Submitted"}
-                    </span>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowReceipt(false)}
-                      className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-
-                <div className="px-5 py-5">
-                  <div className="text-center">
-                    <div className="text-[11px] uppercase tracking-wider text-zinc-400">
-                      Amount
-                    </div>
-                    <div className="mt-2 text-4xl font-extrabold tracking-tight text-white">
-                      {receiptAmountDisplay}
-                      <span className="text-white/60 text-base font-semibold ml-2">
-                        {receiptTokenDisplay}
+                          ? "Failed"
+                          : activeReceipt.status === "confirming"
+                          ? "Confirming"
+                          : "Submitted"}
                       </span>
-                    </div>
-                  </div>
 
-                  <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] overflow-hidden">
-                    <div className="px-4 py-3 border-b border-white/10">
-                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">
-                        To
-                      </div>
-                      <div className="mt-1 text-sm text-white font-mono break-all">
-                        {activeReceipt.to
-                          ? shortMid(activeReceipt.to, 10, 10)
-                          : "—"}
-                      </div>
-                    </div>
+                      <span
+                        className={[
+                          "text-[11px] px-2 py-1 rounded-full border",
+                          modalAccent,
+                        ].join(" ")}
+                      >
+                        {activeReceipt.direction === "received" ? "Received" : "Sent"}
+                      </span>
 
-                    <div className="px-4 py-3 border-b border-white/10">
-                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">
-                        From
-                      </div>
-                      <div className="mt-1 text-sm text-white font-mono break-all">
-                        {activeReceipt.from
-                          ? shortMid(activeReceipt.from, 10, 10)
-                          : "—"}
-                      </div>
-                    </div>
-
-                    <div className="px-4 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-[11px] uppercase tracking-wider text-zinc-400">
-                            Transaction ID
-                          </div>
-                          <div className="mt-1 text-xs text-zinc-300 font-mono break-all">
-                            {activeReceipt.sig
-                              ? shortMid(activeReceipt.sig, 12, 12)
-                              : "Pending signature…"}
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          disabled={!activeReceipt.sig}
-                          onClick={async () => {
-                            if (!activeReceipt.sig) return;
-                            const ok = await copyText(activeReceipt.sig);
-                            if (ok) {
-                              setSigCopied(true);
-                              window.setTimeout(() => setSigCopied(false), 1200);
-                            }
-                          }}
-                          className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          {sigCopied ? "Copied ✓" : "Copy"}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Notes */}
-                  <div className="mt-4">
-                    <label className="text-xs text-zinc-400">Note</label>
-                    <textarea
-                      value={receiptNoteDraft}
-                      onChange={(e) => setReceiptNoteDraft(e.target.value)}
-                      placeholder='e.g., "Lunch", "Gas", "Invoice #124"'
-                      className="w-full mt-2 rounded-xl bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20 min-h-[86px]"
-                    />
-
-                    <div className="mt-2 flex items-center gap-3">
                       <button
                         type="button"
-                        onClick={() => {
-                          updateReceiptNote(activeReceipt.id, receiptNoteDraft);
-                          setNoteSavedTick(true);
-                          window.setTimeout(() => setNoteSavedTick(false), 1200);
-                        }}
-                        className="rounded-xl px-4 py-3 text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10"
+                        onClick={() => setShowReceipt(false)}
+                        className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10"
                       >
-                        {noteSavedTick ? "Saved ✓" : "Save Note"}
+                        Close
                       </button>
-
-                      <span className="text-[11px] text-zinc-500">
-                        Notes save locally (this device)
-                      </span>
                     </div>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const text = activeReceipt.explorerUrl ?? "";
-                        if (!text) return;
-                        const ok = await copyText(text);
-                        if (ok) {
-                          setReceiptCopied(true);
-                          window.setTimeout(
-                            () => setReceiptCopied(false),
-                            1200
-                          );
-                        }
-                      }}
-                      disabled={!activeReceipt.explorerUrl}
-                      className="rounded-xl px-4 py-3 text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {receiptCopied ? "Link Copied ✓" : "Copy Link"}
-                    </button>
+                  <div className="px-5 py-5">
+                    <div className="text-center">
+                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                        Amount
+                      </div>
+                      <div className="mt-2 text-4xl font-extrabold tracking-tight text-white uz-receipt__amount">
+                        {receiptAmountDisplay}
+                        <span className="text-white/60 text-base font-semibold ml-2">
+                          {receiptTokenDisplay}
+                        </span>
+                      </div>
+                    </div>
 
-                    <a
-                      href={activeReceipt.explorerUrl ?? "#"}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={[
-                        "rounded-xl px-4 py-3 text-sm font-semibold text-center",
-                        activeReceipt.explorerUrl
-                          ? "bg-white text-black hover:opacity-90"
-                          : "bg-white/10 text-white/40 pointer-events-none",
-                      ].join(" ")}
-                    >
-                      View on Explorer
-                    </a>
+                    <div className="mt-5 rounded-2xl overflow-hidden uz-receipt__panel">
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                          To
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {activeReceipt.to
+                            ? shortMid(activeReceipt.to, 10, 10)
+                            : "—"}
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                          From
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {activeReceipt.from
+                            ? shortMid(activeReceipt.from, 10, 10)
+                            : "—"}
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                              Transaction ID
+                            </div>
+                            <div className="mt-1 text-xs text-zinc-300 font-mono break-all">
+                              {activeReceipt.sig
+                                ? shortMid(activeReceipt.sig, 12, 12)
+                                : "Pending signature…"}
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={!activeReceipt.sig}
+                            onClick={async () => {
+                              if (!activeReceipt.sig) return;
+                              const ok = await copyText(activeReceipt.sig);
+                              if (ok) {
+                                setSigCopied(true);
+                                window.setTimeout(() => setSigCopied(false), 1200);
+                              }
+                            }}
+                            className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {sigCopied ? "Copied ✓" : "Copy"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Notes */}
+                    <div className="mt-4">
+                      <label className="text-xs text-zinc-400">Note</label>
+                      <textarea
+                        value={receiptNoteDraft}
+                        onChange={(e) => setReceiptNoteDraft(e.target.value)}
+                        placeholder='e.g., "Lunch", "Gas", "Invoice #124"'
+                        className="w-full mt-2 rounded-xl bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20 min-h-[86px]"
+                      />
+
+                      <div className="mt-2 flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateReceiptNote(activeReceipt.id, receiptNoteDraft);
+                            setNoteSavedTick(true);
+                            window.setTimeout(() => setNoteSavedTick(false), 1200);
+                          }}
+                          className="rounded-xl px-4 py-3 text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10"
+                        >
+                          {noteSavedTick ? "Saved ✓" : "Save Note"}
+                        </button>
+
+                        <span className="text-[11px] text-zinc-500">
+                          Notes save locally (this device)
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const text = activeReceipt.explorerUrl ?? "";
+                          if (!text) return;
+                          const ok = await copyText(text);
+                          if (ok) {
+                            setReceiptCopied(true);
+                            window.setTimeout(() => setReceiptCopied(false), 1200);
+                          }
+                        }}
+                        disabled={!activeReceipt.explorerUrl}
+                        className="rounded-xl px-4 py-3 text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {receiptCopied ? "Link Copied ✓" : "Copy Link"}
+                      </button>
+
+                      <a
+                        href={activeReceipt.explorerUrl ?? "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={[
+                          "rounded-xl px-4 py-3 text-sm font-semibold text-center",
+                          activeReceipt.explorerUrl
+                            ? "bg-white text-black hover:opacity-90"
+                            : "bg-white/10 text-white/40 pointer-events-none",
+                        ].join(" ")}
+                      >
+                        View on Explorer
+                      </a>
+                    </div>
+
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={resetForNewPayment}
+                        className="w-full rounded-xl px-4 py-3 text-sm font-semibold bg-emerald-500/20 border border-emerald-400/30 text-emerald-100 hover:bg-emerald-500/25"
+                      >
+                        New Payment
+                      </button>
+                    </div>
+
+                    <div className="mt-4 text-center text-[11px] text-zinc-500">
+                      UTILIZAP • {activeReceipt.cluster}
+                    </div>
                   </div>
 
-                  <div className="mt-3">
-                    <button
-                      type="button"
-                      onClick={resetForNewPayment}
-                      className="w-full rounded-xl px-4 py-3 text-sm font-semibold bg-emerald-500/20 border border-emerald-400/30 text-emerald-100 hover:bg-emerald-500/25"
-                    >
-                      New Payment
-                    </button>
+                  <div className="sm:hidden pb-3">
+                    <div className="mx-auto h-1.5 w-12 rounded-full bg-white/15" />
                   </div>
-
-                  <div className="mt-4 text-center text-[11px] text-zinc-500">
-                    UTILIZAP • {activeReceipt.cluster}
-                  </div>
-                </div>
-
-                <div className="sm:hidden pb-3">
-                  <div className="mx-auto h-1.5 w-12 rounded-full bg-white/15" />
                 </div>
               </div>
             </div>

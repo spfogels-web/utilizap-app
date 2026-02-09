@@ -209,8 +209,6 @@ body {
   border: 2px solid #ffffff;
 }
 
-
-
 .uz-scan-qr {
   position: relative;
   width: 14px;
@@ -259,6 +257,7 @@ body {
 
 /* ================================
    CLEAR BUTTON — BLACK → RED
+   (MUST REMAIN UNCHANGED)
    ================================ */
 
 .uz-btn-clear {
@@ -301,4 +300,253 @@ body {
 .uz-btn-clear:disabled {
   opacity: 0.85;
   cursor: not-allowed;
+}
+
+/* ============================================================
+   UTILIZAP — PREVIEW TRANSACTION MODAL (SCOPED / SAFE)
+   Only applies to elements using classes starting with:
+   .uz-preview__
+   ============================================================ */
+
+.uz-preview__backdrop {
+  background: rgba(0, 0, 0, 0.74);
+  backdrop-filter: blur(10px);
+}
+
+.uz-preview__ring {
+  position: relative;
+  border-radius: 26px;
+  overflow: hidden;
+}
+
+.uz-preview__ring::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--uz-purple), 0.70),
+    rgba(var(--uz-blue), 0.62),
+    rgba(var(--uz-gold), 0.30)
+  );
+  pointer-events: none;
+  filter: saturate(1.1);
+}
+
+.uz-preview__surface {
+  position: relative;
+  border-radius: 26px;
+  background:
+    radial-gradient(
+      900px 460px at 20% 0%,
+      rgba(var(--uz-purple), 0.15),
+      transparent 55%
+    ),
+    radial-gradient(
+      700px 420px at 80% 10%,
+      rgba(var(--uz-blue), 0.12),
+      transparent 60%
+    ),
+    rgba(0, 0, 0, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(18px);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55) inset,
+    0 22px 70px rgba(0, 0, 0, 0.82);
+}
+
+.uz-preview__header {
+  background: linear-gradient(
+    90deg,
+    rgba(var(--uz-purple), 0.20),
+    rgba(var(--uz-blue), 0.14),
+    rgba(var(--uz-gold), 0.08)
+  );
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.uz-preview__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.uz-preview__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--uz-purple), 1),
+    rgba(var(--uz-blue), 1)
+  );
+  box-shadow:
+    0 0 16px rgba(var(--uz-blue), 0.45),
+    0 0 20px rgba(var(--uz-purple), 0.25);
+}
+
+.uz-preview__amount {
+  text-shadow:
+    0 0 18px rgba(var(--uz-blue), 0.30),
+    0 0 30px rgba(var(--uz-purple), 0.22);
+}
+
+.uz-preview__panel {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.06),
+      rgba(255, 255, 255, 0.03)
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+.uz-preview__primary {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--uz-blue), 0.95),
+    rgba(var(--uz-purple), 0.95)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-weight: 900;
+  box-shadow:
+    0 14px 34px rgba(var(--uz-blue), 0.22),
+    0 10px 26px rgba(var(--uz-purple), 0.18);
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+
+.uz-preview__primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+.uz-preview__primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.uz-preview__secondary {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 800;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+
+.uz-preview__secondary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+/* ============================================================
+   UTILIZAP — RECEIPTS (SCOPED / SAFE)
+   Only applies where you add .uz-receipt__* classes in JSX
+   ============================================================ */
+
+/* Receipt history row tile */
+.uz-receipt__tile {
+  position: relative;
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      800px 260px at 18% 0%,
+      rgba(var(--uz-purple), 0.14),
+      transparent 55%
+    ),
+    radial-gradient(
+      700px 220px at 85% 5%,
+      rgba(var(--uz-blue), 0.12),
+      transparent 60%
+    ),
+    rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.uz-receipt__tile:hover {
+  border-color: rgba(var(--uz-purple), 0.35);
+  box-shadow:
+    0 0 0 1px rgba(var(--uz-purple), 0.18),
+    0 16px 40px rgba(var(--uz-blue), 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  transform: translateY(-1px);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+/* Amount pop inside receipts */
+.uz-receipt__amount {
+  text-shadow:
+    0 0 14px rgba(var(--uz-blue), 0.28),
+    0 0 22px rgba(var(--uz-purple), 0.20);
+}
+
+/* Badge base (optional helper) */
+.uz-receipt__badge {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+/* Receipt modal ring/surface */
+.uz-receipt__modalRing {
+  position: relative;
+  border-radius: 26px;
+  overflow: hidden;
+}
+
+.uz-receipt__modalRing::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--uz-blue), 0.55),
+    rgba(var(--uz-purple), 0.62),
+    rgba(var(--uz-gold), 0.22)
+  );
+  pointer-events: none;
+}
+
+.uz-receipt__modalSurface {
+  position: relative;
+  border-radius: 26px;
+  background:
+    radial-gradient(
+      900px 480px at 15% 0%,
+      rgba(var(--uz-purple), 0.16),
+      transparent 55%
+    ),
+    radial-gradient(
+      700px 420px at 85% 10%,
+      rgba(var(--uz-blue), 0.14),
+      transparent 60%
+    ),
+    rgba(0, 0, 0, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(18px);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55) inset,
+    0 22px 70px rgba(0, 0, 0, 0.82);
+}
+
+/* Panels inside receipt modal */
+.uz-receipt__panel {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.06),
+      rgba(255, 255, 255, 0.03)
+    );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
 }
