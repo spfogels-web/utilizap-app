@@ -228,8 +228,8 @@ function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-// ✅ FIX: Helius Enhanced tx objects don't guarantee `err` exists on your `HeliusTx` type.
-// So we safely read error flags using `any` and a few common shapes.
+// ✅ FIX: Helius Enhanced tx objects don't guarantee `err` exists on your type.
+// We safely read error flags using `any` and a few common shapes.
 function heliusHasError(tx: unknown): boolean {
   const t = tx as any;
   return Boolean(t?.transactionError || t?.err || t?.meta?.err);
@@ -268,7 +268,6 @@ function HomeInner() {
   const [receiptFilter, setReceiptFilter] = useState<
     "all" | "confirmed" | "pending" | "failed"
   >("all");
-
   const [receiptTab, setReceiptTab] = useState<"all" | "sent" | "received">(
     "all"
   );
@@ -297,7 +296,7 @@ function HomeInner() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // ✅ NEW: listen for amount emitted by QR scan (UTILIZAP request QR)
+  // ✅ Listen for amount emitted by QR scan (UTILIZAP request QR)
   useEffect(() => {
     if (!mounted) return;
 
@@ -394,16 +393,12 @@ function HomeInner() {
     return s;
   }, [activeReceipt]);
 
-  const receiptTokenDisplay = useMemo(() => {
-    if (!activeReceipt) return "USDC";
-    return activeReceipt.tokenSymbol ?? "USDC";
-  }, [activeReceipt]);
-
   // --------------------
   // REQUEST PAYMENT LINK (generator + copy + QR)
   // --------------------
   const [origin, setOrigin] = useState<string>("");
   const [requestAmount, setRequestAmount] = useState<string>("");
+  const [requestNote, setRequestNote] = useState<string>(""); // ✅ NEW
   const [copied, setCopied] = useState(false);
 
   const [showRequestQr, setShowRequestQr] = useState(false);
@@ -429,8 +424,14 @@ function HomeInner() {
       }
     }
 
+    const note = requestNote.trim();
+    if (note) {
+      // keep it reasonable so links don't get crazy long
+      params.set("note", note.slice(0, 140));
+    }
+
     return `${origin}/?${params.toString()}`;
-  }, [origin, publicKey, requestAmount]);
+  }, [origin, publicKey, requestAmount, requestNote]);
 
   async function copyRequestLink() {
     if (!requestLink) return;
@@ -495,6 +496,7 @@ function HomeInner() {
 
     const to = searchParams.get("to");
     const amt = searchParams.get("amount");
+    const note = searchParams.get("note"); // ✅ NEW
 
     let didAnything = false;
 
@@ -508,6 +510,14 @@ function HomeInner() {
       const n = Number(clean);
       if (Number.isFinite(n) && n > 0) {
         setAmount(clean);
+        didAnything = true;
+      }
+    }
+
+    if (note) {
+      const cleanNote = note.trim();
+      if (cleanNote.length > 0) {
+        setTxNote(cleanNote);
         didAnything = true;
       }
     }
@@ -705,17 +715,12 @@ function HomeInner() {
         const direction: TxReceiptDirection = net >= 0 ? "received" : "sent";
         const amountAbs = Math.abs(net);
 
-        const tsSeconds =
-          (tx as any)?.timestamp ?? (tx as any)?.blockTime ?? null;
+        const tsSeconds = (tx as any)?.timestamp ?? (tx as any)?.blockTime ?? null;
 
         const createdAt =
-          typeof tsSeconds === "number" && tsSeconds > 0
-            ? tsSeconds * 1000
-            : Date.now();
+          typeof tsSeconds === "number" && tsSeconds > 0 ? tsSeconds * 1000 : Date.now();
 
-        const status: TxReceiptStatus = heliusHasError(tx)
-          ? "failed"
-          : "confirmed";
+        const status: TxReceiptStatus = heliusHasError(tx) ? "failed" : "confirmed";
 
         const id = `h_${sig}`;
 
@@ -755,7 +760,7 @@ function HomeInner() {
     }
   }
 
-  // Auto-sync once per wallet connect (wrapped so UI never blanks)
+  // Auto-sync once per wallet connect
   useEffect(() => {
     if (!publicKey || !connected) return;
 
@@ -801,15 +806,10 @@ function HomeInner() {
       return hay.includes(q);
     }
 
-    return receipts.filter(
-      (r) => matchesFilter(r) && matchesTab(r) && matchesQuery(r)
-    );
+    return receipts.filter((r) => matchesFilter(r) && matchesTab(r) && matchesQuery(r));
   }, [receipts, receiptSearch, receiptFilter, receiptTab]);
 
-  const recentReceipts = useMemo(
-    () => filteredReceipts.slice(0, 10),
-    [filteredReceipts]
-  );
+  const recentReceipts = useMemo(() => filteredReceipts.slice(0, 10), [filteredReceipts]);
 
   const onSendUsdc = async () => {
     const from = publicKey?.toBase58() ?? "";
@@ -843,14 +843,13 @@ function HomeInner() {
       setReceipts(loadReceipts());
       setActiveReceipt(receiptDraft);
 
-      const { signature, blockhash, lastValidBlockHeight } =
-        await sendUsdcDevnet({
-          connection,
-          sender: publicKey!,
-          recipient: new PublicKey(to),
-          amountUi,
-          signTransaction: signTransaction!,
-        });
+      const { signature, blockhash, lastValidBlockHeight } = await sendUsdcDevnet({
+        connection,
+        sender: publicKey!,
+        recipient: new PublicKey(to),
+        amountUi,
+        signTransaction: signTransaction!,
+      });
 
       setTxSig(signature);
       setTxStage("confirming");
@@ -882,7 +881,7 @@ function HomeInner() {
       setTxStage("confirmed");
       refreshBalances();
 
-      // Allow a re-sync later
+      // allow a re-sync later
       lastHeliusSyncRef.current = "";
     } catch (e: any) {
       setTxStage("failed");
@@ -898,7 +897,6 @@ function HomeInner() {
     }
   };
 
-  const showTxPanel = txStage !== "idle";
   const isBusy =
     isSending ||
     txStage === "signing" ||
@@ -946,9 +944,7 @@ function HomeInner() {
 
   const modalTitle = useMemo(() => {
     if (!activeReceipt) return "Transaction Receipt";
-    return activeReceipt.direction === "received"
-      ? "Payment Received"
-      : "Payment Sent";
+    return activeReceipt.direction === "received" ? "Payment Received" : "Payment Sent";
   }, [activeReceipt]);
 
   const modalAccent = useMemo(() => {
@@ -957,6 +953,25 @@ function HomeInner() {
       ? "border-sky-400/30 bg-sky-400/10 text-sky-200"
       : "border-amber-400/30 bg-amber-400/10 text-amber-200";
   }, [activeReceipt]);
+
+  const receiptShareLink = useMemo(() => {
+    if (!mounted || !activeReceipt?.to) return "";
+    try {
+      const o = window.location.origin;
+      const params = new URLSearchParams();
+      params.set("to", activeReceipt.to);
+
+      const n = Number(activeReceipt.amountUi);
+      if (Number.isFinite(n) && n > 0) params.set("amount", String(activeReceipt.amountUi));
+
+      const note = (activeReceipt.note ?? "").trim();
+      if (note) params.set("note", note.slice(0, 140));
+
+      return `${o}/?${params.toString()}`;
+    } catch {
+      return "";
+    }
+  }, [mounted, activeReceipt]);
 
   // --------------------
   // ✅ PREVIEW helpers
@@ -1008,8 +1023,7 @@ function HomeInner() {
 
       const msg = tx.compileMessage();
       const feeLamports = await connection.getFeeForMessage(msg, "confirmed");
-      const lamports =
-        typeof feeLamports?.value === "number" ? feeLamports.value : null;
+      const lamports = typeof feeLamports?.value === "number" ? feeLamports.value : null;
 
       if (lamports === null) return "—";
 
@@ -1146,9 +1160,7 @@ function HomeInner() {
                         <p className="mt-1 text-sm text-white/60">Used for network fees</p>
                       </div>
 
-                      <span className="text-xs px-3 py-1 rounded-full uz-chip">
-                        Devnet
-                      </span>
+                      <span className="text-xs px-3 py-1 rounded-full uz-chip">Devnet</span>
                     </div>
                   </div>
                 </div>
@@ -1173,16 +1185,12 @@ function HomeInner() {
                 <div className="mb-5 rounded-2xl uz-subpanel p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold text-white">
-                        Request Payment Link
-                      </div>
+                      <div className="text-sm font-semibold text-white">Request Payment Link</div>
                       <div className="mt-1 text-xs text-white/70">
                         Share a link that opens UTILIZAP pre-filled to pay you
                       </div>
                     </div>
-                    <span className="text-[11px] px-2 py-1 rounded-full uz-chip">
-                      Shareable
-                    </span>
+                    <span className="text-[11px] px-2 py-1 rounded-full uz-chip">Shareable</span>
                   </div>
 
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1198,7 +1206,22 @@ function HomeInner() {
                       />
                     </div>
 
+                    {/* ✅ NEW: request note */}
                     <div className="sm:col-span-2">
+                      <label className="text-xs text-white/70">Note (optional)</label>
+                      <input
+                        value={requestNote}
+                        onChange={(e) => setRequestNote(e.target.value)}
+                        placeholder='e.g., "Lunch"'
+                        className="uz-input w-full mt-2"
+                        disabled={!mounted}
+                      />
+                      <div className="mt-2 text-[11px] text-white/60">
+                        This will prefill the sender&apos;s Note field.
+                      </div>
+                    </div>
+
+                    <div className="sm:col-span-3">
                       <label className="text-xs text-white/70">Link</label>
                       <div className="mt-2 flex items-center gap-3">
                         <input
@@ -1220,7 +1243,8 @@ function HomeInner() {
                       </div>
 
                       <div className="mt-2 text-[11px] text-white/60">
-                        Opens: <span className="text-white/80">Recipient + Amount</span>{" "}
+                        Opens:{" "}
+                        <span className="text-white/80">Recipient + Amount + Note</span>{" "}
                         auto-filled
                       </div>
 
@@ -1233,9 +1257,7 @@ function HomeInner() {
                         >
                           {showRequestQr ? "Hide QR" : "Show QR"}
                         </button>
-                        <span className="text-[11px] text-white/70">
-                          Scan to open payment request
-                        </span>
+                        <span className="text-[11px] text-white/70">Scan to open payment request</span>
                       </div>
 
                       {showRequestQr && requestQr && (
@@ -1330,9 +1352,7 @@ function HomeInner() {
                       type="button"
                       onClick={addContactFromRecipient}
                       disabled={
-                        isBusy ||
-                        !contactName.trim() ||
-                        !isValidSolanaAddress(recipient.trim())
+                        isBusy || !contactName.trim() || !isValidSolanaAddress(recipient.trim())
                       }
                       className="uz-btn-secondary"
                     >
@@ -1391,8 +1411,7 @@ function HomeInner() {
                     </div>
                   ) : (
                     <div className="mt-3 rounded-xl px-3 py-3 text-xs text-white/70 uz-subpanel">
-                      No contacts yet. Enter a name and use a valid recipient address,
-                      then hit{" "}
+                      No contacts yet. Enter a name and use a valid recipient address, then hit{" "}
                       <span className="text-white font-semibold">Save Contact</span>.
                     </div>
                   )}
@@ -1440,22 +1459,6 @@ function HomeInner() {
 
                 {txStage === "confirming" && (
                   <div className="mt-2 text-xs text-white/70">Confirming on Solana…</div>
-                )}
-
-                {showTxPanel && (
-                  <div className="mt-4 text-xs">
-                    {txError && <div className="text-red-300">{txError}</div>}
-                    {explorerUrl && (
-                      <a
-                        href={explorerUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-sky-200 underline"
-                      >
-                        View transaction →
-                      </a>
-                    )}
-                  </div>
                 )}
 
                 {/* RECEIPT HISTORY */}
@@ -1578,9 +1581,7 @@ function HomeInner() {
 
                                   <div className="text-sm font-semibold text-white truncate uz-receipt__amount">
                                     {amountPretty}{" "}
-                                    <span className="text-white/70 font-semibold">
-                                      USDC
-                                    </span>
+                                    <span className="text-white/70 font-semibold">USDC</span>
                                   </div>
                                 </div>
 
@@ -1635,11 +1636,15 @@ function HomeInner() {
                                   disabled={!r.sig}
                                   onClick={async () => {
                                     if (!r.sig) return;
-                                    await copyText(r.sig);
+                                    const ok = await copyText(r.sig);
+                                    if (ok) {
+                                      setSigCopied(true);
+                                      window.setTimeout(() => setSigCopied(false), 1200);
+                                    }
                                   }}
                                   className="uz-btn-secondary disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
-                                  Copy Tx
+                                  {sigCopied ? "Copied ✓" : "Copy Tx"}
                                 </button>
 
                                 <a
@@ -1697,9 +1702,7 @@ function HomeInner() {
               )}
             </div>
 
-            <div className="mt-4 text-xs text-white/70">
-              Utility first. Build first. Launch second.
-            </div>
+            <div className="mt-4 text-xs text-white/70">Utility first. Build first. Launch second.</div>
           </section>
         )}
 
@@ -1707,6 +1710,219 @@ function HomeInner() {
           UTILIZAP • Non-custodial payments • Devnet environment
         </footer>
       </div>
+
+      {/* ✅ RECEIPT MODAL (FINAL TRANSACTION RECEIPT + NOTE EDIT) */}
+      {showReceipt && activeReceipt && (
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="absolute inset-0 uz-preview__backdrop"
+            onClick={() => setShowReceipt(false)}
+            aria-label="Close receipt"
+          />
+
+          <div className="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-6">
+            <div className="w-full sm:max-w-md">
+              <div className="uz-preview__ring">
+                <div className="uz-preview__surface rounded-t-3xl sm:rounded-2xl overflow-hidden">
+                  <div className="uz-preview__header px-5 py-4 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="text-sm font-semibold text-white">{modalTitle}</div>
+                        <span className={["text-[11px] px-2 py-0.5 rounded-full border", modalAccent].join(" ")}>
+                          {activeReceipt.status === "confirmed"
+                            ? "Confirmed"
+                            : activeReceipt.status === "failed"
+                            ? "Failed"
+                            : activeReceipt.status === "confirming"
+                            ? "Confirming"
+                            : "Submitted"}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-xs text-white/70">
+                        {fmtWhen(activeReceipt.createdAt)} • {activeReceipt.cluster}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowReceipt(false)}
+                      className="uz-preview__secondary rounded-lg px-3 py-2 text-xs"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="px-5 py-5">
+                    {/* Amount */}
+                    <div className="text-center">
+                      <div className="text-[11px] uppercase tracking-wider text-white/70">
+                        Amount
+                      </div>
+                      <div className="mt-2 text-4xl font-extrabold tracking-tight text-white uz-preview__amount">
+                        {receiptAmountDisplay}
+                        <span className="text-white/70 text-base font-semibold ml-2">
+                          USDC
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Details */}
+                    <div className="mt-5 rounded-2xl overflow-hidden uz-preview__panel">
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          To
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {activeReceipt.to ? shortMid(activeReceipt.to, 10, 10) : "—"}
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          From
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {activeReceipt.from ? shortMid(activeReceipt.from, 10, 10) : "—"}
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          Tx Signature
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {activeReceipt.sig ? shortMid(activeReceipt.sig, 14, 14) : "Pending…"}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Note editor */}
+                    <div className="mt-4 rounded-2xl px-4 py-3 uz-preview__panel">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          Note
+                        </div>
+                        {noteSavedTick ? (
+                          <span className="text-[11px] text-emerald-200">Saved ✓</span>
+                        ) : null}
+                      </div>
+
+                      <input
+                        value={receiptNoteDraft}
+                        onChange={(e) => {
+                          setReceiptNoteDraft(e.target.value);
+                          setNoteSavedTick(false);
+                        }}
+                        placeholder='Add a note (e.g., "Rent", "Lunch")'
+                        className="uz-input w-full mt-2"
+                      />
+
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!activeReceipt) return;
+                            updateReceiptNote(activeReceipt.id, receiptNoteDraft);
+                            setNoteSavedTick(true);
+                            window.setTimeout(() => setNoteSavedTick(false), 1400);
+                          }}
+                          className="uz-btn-secondary"
+                        >
+                          Save Note
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReceiptNoteDraft("");
+                            setNoteSavedTick(false);
+                            if (!activeReceipt) return;
+                            updateReceiptNote(activeReceipt.id, "");
+                            setNoteSavedTick(true);
+                            window.setTimeout(() => setNoteSavedTick(false), 1400);
+                          }}
+                          className="uz-btn-secondary"
+                        >
+                          Clear Note
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!activeReceipt?.sig) return;
+                          const ok = await copyText(activeReceipt.sig);
+                          if (ok) {
+                            setSigCopied(true);
+                            window.setTimeout(() => setSigCopied(false), 1200);
+                          }
+                        }}
+                        disabled={!activeReceipt.sig}
+                        className="uz-preview__secondary rounded-xl px-4 py-3 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {sigCopied ? "Copied ✓" : "Copy Tx"}
+                      </button>
+
+                      <a
+                        href={activeReceipt.explorerUrl ?? "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={[
+                          "uz-preview__primary rounded-xl px-4 py-3 text-sm font-semibold text-center",
+                          activeReceipt.explorerUrl ? "" : "pointer-events-none opacity-40",
+                        ].join(" ")}
+                      >
+                        Explorer →
+                      </a>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!receiptShareLink) return;
+                          const ok = await copyText(receiptShareLink);
+                          if (ok) {
+                            setReceiptCopied(true);
+                            window.setTimeout(() => setReceiptCopied(false), 1200);
+                          }
+                        }}
+                        disabled={!receiptShareLink}
+                        className="uz-preview__secondary rounded-xl px-4 py-3 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {receiptCopied ? "Copied ✓" : "Copy Receipt Link"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowReceipt(false);
+                          resetForNewPayment();
+                        }}
+                        className="uz-preview__primary rounded-xl px-4 py-3 text-sm font-semibold"
+                      >
+                        New Payment →
+                      </button>
+                    </div>
+
+                    <div className="mt-4 text-center text-[11px] text-white/60">
+                      UTILIZAP • Receipt
+                    </div>
+                  </div>
+
+                  <div className="sm:hidden pb-3">
+                    <div className="mx-auto h-1.5 w-12 rounded-full bg-white/15" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ✅ PREVIEW MODAL (BEFORE PHANTOM) */}
       {showPreview && (
@@ -1724,9 +1940,7 @@ function HomeInner() {
                 <div className="uz-preview__surface rounded-t-3xl sm:rounded-2xl overflow-hidden">
                   <div className="uz-preview__header px-5 py-4 flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-white">
-                        Preview Transaction
-                      </div>
+                      <div className="text-sm font-semibold text-white">Preview Transaction</div>
                       <div className="mt-0.5 text-xs text-white/70">
                         Confirm details before Phantom opens
                       </div>
@@ -1748,9 +1962,7 @@ function HomeInner() {
                       </div>
                       <div className="mt-2 text-4xl font-extrabold tracking-tight text-white uz-preview__amount">
                         {previewAmountPretty}
-                        <span className="text-white/70 text-base font-semibold ml-2">
-                          USDC
-                        </span>
+                        <span className="text-white/70 text-base font-semibold ml-2">USDC</span>
                       </div>
                     </div>
 
@@ -1820,8 +2032,8 @@ function HomeInner() {
                           className="mt-0.5"
                         />
                         <span className="text-xs text-white/80">
-                          I confirm the recipient and amount are correct. I understand
-                          blockchain transactions are typically irreversible.
+                          I confirm the recipient and amount are correct. I understand blockchain
+                          transactions are typically irreversible.
                         </span>
                       </label>
                     </div>
