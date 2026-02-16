@@ -23,7 +23,11 @@ import ReceiveQr from "./components/ReceiveQr";
  * ✅ Devnet USDC mint (Helius tokenTransfers uses mint address)
  * This is standard for Solana devnet USDC.
  */
-const USDC_MINT_DEVNET = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const USDC_MINT_DEVNET =
+  "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
+// ✅ QR scanner amount auto-fill channel (emitted by QrScanButton when scanning UTILIZAP request QR)
+const UZ_QR_AMOUNT_EVENT = "uz:qr:amount";
 
 function shortAddr(address: string) {
   return address.slice(0, 4) + "..." + address.slice(-4);
@@ -293,6 +297,25 @@ function HomeInner() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // ✅ NEW: listen for amount emitted by QR scan (UTILIZAP request QR)
+  useEffect(() => {
+    if (!mounted) return;
+
+    const handler = (e: any) => {
+      const raw = e?.detail?.amount;
+      if (!raw) return;
+
+      const clean = String(raw).trim();
+      const n = Number(clean);
+      if (!Number.isFinite(n) || n <= 0) return;
+
+      setAmount(clean);
+    };
+
+    window.addEventListener(UZ_QR_AMOUNT_EVENT, handler as any);
+    return () => window.removeEventListener(UZ_QR_AMOUNT_EVENT, handler as any);
+  }, [mounted]);
+
   function fmtWhen(ts: number) {
     try {
       return new Date(ts).toLocaleString();
@@ -417,9 +440,7 @@ function HomeInner() {
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
       try {
-        const el = document.getElementById(
-          "uz-request-link"
-        ) as HTMLInputElement;
+        const el = document.getElementById("uz-request-link") as HTMLInputElement;
         if (el) {
           el.focus();
           el.select();
@@ -613,8 +634,7 @@ function HomeInner() {
         if (!sig) continue;
 
         const tokenTransfers = (tx as any)?.tokenTransfers || [];
-        if (!Array.isArray(tokenTransfers) || tokenTransfers.length === 0)
-          continue;
+        if (!Array.isArray(tokenTransfers) || tokenTransfers.length === 0) continue;
 
         // NET relative to wallet: + received, - sent
         let net = 0;
@@ -633,7 +653,6 @@ function HomeInner() {
           if (typeof raw === "number") amt = raw;
           else if (typeof raw === "string") amt = Number(raw);
           else if (raw && typeof raw === "object") {
-            // Helius commonly returns tokenAmount as an object
             if (typeof raw.uiAmount === "number") amt = raw.uiAmount;
             else if (typeof raw.uiAmountString === "string")
               amt = Number(raw.uiAmountString);
@@ -672,7 +691,6 @@ function HomeInner() {
               t?.toUserAccount || t?.toAccount || t?.toTokenAccount || ""
             );
           } else {
-            // fallback: show it as received
             involved = true;
             net += amt;
             bestFrom = String(
@@ -855,10 +873,7 @@ function HomeInner() {
 
       if (conf.value.err) throw new Error("Transaction failed");
 
-      const confirmed: TxReceipt = {
-        ...withSig,
-        status: "confirmed",
-      };
+      const confirmed: TxReceipt = { ...withSig, status: "confirmed" };
 
       upsertReceipt(confirmed);
       setReceipts(loadReceipts());
@@ -873,10 +888,7 @@ function HomeInner() {
       setTxStage("failed");
       setTxError(e?.message ?? "Send failed");
 
-      const failed: TxReceipt = {
-        ...receiptDraft,
-        status: "failed",
-      };
+      const failed: TxReceipt = { ...receiptDraft, status: "failed" };
 
       upsertReceipt(failed);
       setReceipts(loadReceipts());
@@ -959,11 +971,8 @@ function HomeInner() {
 
   function openPreview() {
     setPreviewWarn(null);
-
-    // hard guard
     if (!canSend || isBusy) return;
 
-    // sanity warnings
     try {
       const from = previewFrom.trim();
       const to = previewTo.trim();
@@ -984,13 +993,11 @@ function HomeInner() {
   async function estimateNetworkFee(): Promise<string> {
     try {
       if (!publicKey) return "—";
-      // Best-effort estimate (not exact for SPL USDC, but close enough for a user preview)
       const { blockhash } = await connection.getLatestBlockhash("finalized");
       const tx = new Transaction({
         feePayer: publicKey,
         recentBlockhash: blockhash,
       });
-      // 0-lamport self transfer (fee estimate only)
       tx.add(
         SystemProgram.transfer({
           fromPubkey: publicKey,
@@ -1040,25 +1047,19 @@ function HomeInner() {
     if (!previewAck) return;
     setShowPreview(false);
 
-    // tiny delay so modal closes cleanly before Phantom pops
     window.setTimeout(() => {
       onSendUsdc();
     }, 30);
   }
 
   return (
-    <main className="min-h-screen text-white bg-black relative">
-      {/* Premium background layers */}
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_20%_10%,rgba(120,80,255,.20),transparent_60%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_80%_20%,rgba(255,210,120,.14),transparent_60%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(900px_600px_at_50%_90%,rgba(70,140,255,.16),transparent_60%)]" />
-        <div className="absolute inset-0 opacity-30 bg-[linear-gradient(to_right,rgba(255,255,255,.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.06)_1px,transparent_1px)] bg-[size:64px_64px]" />
-      </div>
+    <main className="min-h-screen text-white bg-black relative uz-app">
+      {/* UTILIZAP PURPLE/BLUE BACKGROUND */}
+      <div className="pointer-events-none absolute inset-0 uz-bg" />
 
       <div className="relative mx-auto w-full max-w-5xl px-4 sm:px-6 py-8">
         {/* Header */}
-        <header className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md px-4 sm:px-6 py-4">
+        <header className="uz-shellHeader flex items-center justify-between gap-4 rounded-2xl px-4 sm:px-6 py-4">
           <div className="flex items-center gap-3 min-w-0">
             <img
               src="/brand/utilizap-logo.png"
@@ -1067,15 +1068,15 @@ function HomeInner() {
               className="h-10 w-auto select-none"
             />
             <div className="min-w-0">
-              <div className="text-xs text-zinc-400 truncate">
+              <div className="text-xs text-white/80 truncate">
                 Non-custodial USDC wallet-to-wallet transfers on Solana
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="hidden sm:inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs text-zinc-300">
-              <span className="inline-block h-2 w-2 rounded-full bg-emerald-400/80" />
+            <span className="hidden sm:inline-flex items-center gap-2 rounded-full uz-chip">
+              <span className="inline-block h-2 w-2 rounded-full bg-emerald-400/90" />
               Devnet
             </span>
 
@@ -1096,69 +1097,56 @@ function HomeInner() {
         {connected && publicKey ? (
           <section className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Left: Wallet */}
-            <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5 sm:p-6">
+            <div className="uz-panel rounded-2xl p-5 sm:p-6">
               <div className="flex items-center justify-between gap-4">
                 <h2 className="text-lg font-bold">Wallet</h2>
-                <span className="text-xs text-zinc-400">
-                  Secure • Non-custodial
-                </span>
+                <span className="text-xs text-white/70">Secure • Non-custodial</span>
               </div>
 
-              <div className="mt-4 rounded-xl border border-white/10 bg-black/40 p-4 space-y-4">
+              <div className="mt-4 rounded-xl uz-subpanel p-4 space-y-4">
                 <div className="text-center space-y-1">
-                  <p className="text-sm text-zinc-400">Connected Wallet</p>
-                  <p className="font-mono text-lg">
+                  <p className="text-sm text-white/70">Connected Wallet</p>
+                  <p className="font-mono text-lg text-white">
                     {shortAddr(publicKey.toBase58())}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
+                <div className="rounded-2xl uz-card overflow-hidden">
                   <div className="px-4 py-4 border-b border-white/10">
                     <div className="flex items-center justify-between gap-4">
                       <div>
-                        <p className="text-[11px] uppercase tracking-wider text-zinc-400">
+                        <p className="text-[11px] uppercase tracking-wider text-white/70">
                           Available Balance
                         </p>
                         <p className="mt-1 text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
                           {usdcCash}{" "}
-                          <span className="text-white/60 text-base sm:text-lg font-semibold">
+                          <span className="text-white/70 text-base sm:text-lg font-semibold">
                             USDC
                           </span>
                         </p>
-                        <p className="mt-1 text-sm text-zinc-500">Ready to send</p>
+                        <p className="mt-1 text-sm text-white/60">Ready to send</p>
                       </div>
 
-                      <div
-                        className="h-10 w-10 rounded-xl border border-white/10"
-                        style={{
-                          background:
-                            "linear-gradient(135deg, rgba(124,58,237,.35), rgba(99,102,241,.25))",
-                        }}
-                        aria-hidden="true"
-                      />
+                      <div className="uz-orb" aria-hidden="true" />
                     </div>
 
-                    <div className="mt-2 text-[11px] text-zinc-500">
-                      USDC (devnet)
-                    </div>
+                    <div className="mt-2 text-[11px] text-white/60">USDC (devnet)</div>
                   </div>
 
                   <div className="px-4 py-4">
                     <div className="flex items-center justify-between gap-4">
                       <div>
-                        <p className="text-[11px] uppercase tracking-wider text-zinc-400">
+                        <p className="text-[11px] uppercase tracking-wider text-white/70">
                           Network Balance
                         </p>
                         <p className="mt-1 text-lg font-bold text-white">
                           {solPrecise}{" "}
-                          <span className="text-white/60 font-semibold">SOL</span>
+                          <span className="text-white/70 font-semibold">SOL</span>
                         </p>
-                        <p className="mt-1 text-sm text-zinc-500">
-                          Used for network fees
-                        </p>
+                        <p className="mt-1 text-sm text-white/60">Used for network fees</p>
                       </div>
 
-                      <span className="text-xs px-3 py-1 rounded-full border border-white/10 bg-black/40 text-zinc-300">
+                      <span className="text-xs px-3 py-1 rounded-full uz-chip">
                         Devnet
                       </span>
                     </div>
@@ -1167,62 +1155,57 @@ function HomeInner() {
 
                 <ReceiveQr className="mt-1" />
 
-                <button
-                  onClick={() => disconnect()}
-                  className="uz-danger-btn w-full mt-1 py-2"
-                >
+                <button onClick={() => disconnect()} className="uz-danger-btn w-full mt-1 py-2">
                   Disconnect Wallet
                 </button>
               </div>
             </div>
 
             {/* Right: Send */}
-            <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5 sm:p-6">
+            <div className="uz-panel rounded-2xl p-5 sm:p-6">
               <div className="flex items-center justify-between gap-4">
                 <h2 className="text-lg font-bold">Send USDC</h2>
-                <span className="text-xs text-zinc-400">Devnet</span>
+                <span className="text-xs text-white/70">Devnet</span>
               </div>
 
               <div className="mt-4">
                 {/* Request payment link */}
-                <div className="mb-5 rounded-2xl border border-white/10 bg-black/30 p-4">
+                <div className="mb-5 rounded-2xl uz-subpanel p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold text-white">
                         Request Payment Link
                       </div>
-                      <div className="mt-1 text-xs text-zinc-400">
+                      <div className="mt-1 text-xs text-white/70">
                         Share a link that opens UTILIZAP pre-filled to pay you
                       </div>
                     </div>
-                    <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/5 text-zinc-300">
+                    <span className="text-[11px] px-2 py-1 rounded-full uz-chip">
                       Shareable
                     </span>
                   </div>
 
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="sm:col-span-1">
-                      <label className="text-xs text-zinc-400">
-                        Amount (optional)
-                      </label>
+                      <label className="text-xs text-white/70">Amount (optional)</label>
                       <input
                         value={requestAmount}
                         onChange={(e) => setRequestAmount(e.target.value)}
                         placeholder="e.g., 25"
-                        className="w-full mt-2 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                        className="uz-input w-full mt-2"
                         inputMode="decimal"
                         disabled={!mounted}
                       />
                     </div>
 
                     <div className="sm:col-span-2">
-                      <label className="text-xs text-zinc-400">Link</label>
+                      <label className="text-xs text-white/70">Link</label>
                       <div className="mt-2 flex items-center gap-3">
                         <input
                           id="uz-request-link"
                           value={requestLink || ""}
                           readOnly
-                          className="w-full rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none text-zinc-200"
+                          className="uz-input w-full"
                           placeholder="Connect wallet to generate link…"
                         />
                         <button
@@ -1236,9 +1219,8 @@ function HomeInner() {
                         </button>
                       </div>
 
-                      <div className="mt-2 text-[11px] text-zinc-500">
-                        Opens:{" "}
-                        <span className="text-zinc-300">Recipient + Amount</span>{" "}
+                      <div className="mt-2 text-[11px] text-white/60">
+                        Opens: <span className="text-white/80">Recipient + Amount</span>{" "}
                         auto-filled
                       </div>
 
@@ -1251,14 +1233,14 @@ function HomeInner() {
                         >
                           {showRequestQr ? "Hide QR" : "Show QR"}
                         </button>
-                        <span className="text-[11px] text-zinc-400">
+                        <span className="text-[11px] text-white/70">
                           Scan to open payment request
                         </span>
                       </div>
 
                       {showRequestQr && requestQr && (
                         <div className="mt-4 flex justify-center">
-                          <div className="rounded-xl bg-black p-3 border border-white/10">
+                          <div className="rounded-xl bg-black/40 p-3 border border-white/10">
                             <img
                               src={requestQr}
                               alt="Payment request QR"
@@ -1271,7 +1253,7 @@ function HomeInner() {
                   </div>
                 </div>
 
-                <label className="text-xs text-zinc-400">Recipient</label>
+                <label className="text-xs text-white/70">Recipient</label>
 
                 {mounted ? (
                   <QrScanButton
@@ -1287,7 +1269,7 @@ function HomeInner() {
                     value={recipient}
                     onChange={(e) => setRecipient(e.target.value)}
                     placeholder="Recipient Solana address"
-                    className="w-full rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                    className="uz-input w-full"
                     inputMode="text"
                     autoCapitalize="none"
                     autoCorrect="off"
@@ -1295,7 +1277,6 @@ function HomeInner() {
                     disabled={isBusy}
                   />
 
-                  {/* ✅ KEEP THIS CLEAR BUTTON EXACTLY AS YOU LIKE IT */}
                   <button
                     type="button"
                     onClick={() => setRecipient("")}
@@ -1321,11 +1302,9 @@ function HomeInner() {
                 </div>
 
                 {selectedContact ? (
-                  <div className="mt-1 mb-3 text-xs text-zinc-400">
+                  <div className="mt-1 mb-3 text-xs text-white/70">
                     Selected contact:{" "}
-                    <span className="text-white/80 font-semibold">
-                      {selectedContact.name}
-                    </span>
+                    <span className="text-white font-semibold">{selectedContact.name}</span>
                   </div>
                 ) : (
                   <div className="mb-3" />
@@ -1334,10 +1313,8 @@ function HomeInner() {
                 {/* CONTACTS */}
                 <div className="mb-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs text-zinc-400">Contacts</p>
-                    <p className="text-[11px] text-zinc-500">
-                      Saved on this device
-                    </p>
+                    <p className="text-xs text-white/70">Contacts</p>
+                    <p className="text-[11px] text-white/60">Saved on this device</p>
                   </div>
 
                   <div className="mt-2 flex flex-col sm:flex-row gap-3">
@@ -1345,7 +1322,7 @@ function HomeInner() {
                       value={contactName}
                       onChange={(e) => setContactName(e.target.value)}
                       placeholder="Name (e.g., Mike)"
-                      className="w-full sm:flex-1 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                      className="uz-input w-full sm:flex-1"
                       disabled={isBusy}
                     />
 
@@ -1364,20 +1341,17 @@ function HomeInner() {
                   </div>
 
                   {contacts.length > 0 ? (
-                    <div className="mt-3 rounded-xl border border-white/10 bg-black/30 overflow-hidden">
+                    <div className="mt-3 rounded-xl overflow-hidden uz-subpanel">
                       {contacts.map((c) => {
                         const isSelected =
-                          recipient.trim().toLowerCase() ===
-                          c.address.toLowerCase();
+                          recipient.trim().toLowerCase() === c.address.toLowerCase();
 
                         return (
                           <div
                             key={c.id}
                             className={[
                               "flex items-center justify-between gap-3 px-3 py-3 border-b border-white/10 last:border-b-0",
-                              isSelected
-                                ? "bg-white/10"
-                                : "hover:bg-white/[0.06]",
+                              isSelected ? "bg-white/10" : "hover:bg-white/[0.06]",
                             ].join(" ")}
                           >
                             <button
@@ -1387,17 +1361,17 @@ function HomeInner() {
                               className="text-left flex-1 min-w-0"
                               title="Use this contact"
                             >
-                              <div className="flex items-center gap-2 min-w-0">
+                              <div className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span className="text-sm font-semibold text-white truncate">
                                   {c.name}
                                 </span>
                                 {isSelected ? (
-                                  <span className="text-[11px] px-2 py-0.5 rounded-full border border-white/10 bg-white/10 text-zinc-200">
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full border border-white/10 bg-white/10 text-white/90">
                                     Selected
                                   </span>
                                 ) : null}
                               </div>
-                              <div className="mt-1 text-[11px] text-zinc-400 font-mono truncate">
+                              <div className="mt-1 text-[11px] text-white/70 font-mono truncate">
                                 {c.address}
                               </div>
                             </button>
@@ -1416,39 +1390,33 @@ function HomeInner() {
                       })}
                     </div>
                   ) : (
-                    <div className="mt-3 rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-xs text-zinc-400">
-                      No contacts yet. Enter a name and use a valid recipient
-                      address, then hit{" "}
-                      <span className="text-white/80 font-semibold">
-                        Save Contact
-                      </span>
-                      .
+                    <div className="mt-3 rounded-xl px-3 py-3 text-xs text-white/70 uz-subpanel">
+                      No contacts yet. Enter a name and use a valid recipient address,
+                      then hit{" "}
+                      <span className="text-white font-semibold">Save Contact</span>.
                     </div>
                   )}
                 </div>
 
-                <label className="text-xs text-zinc-400">Amount</label>
+                <label className="text-xs text-white/70">Amount</label>
                 <input
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="Amount (USDC)"
-                  className="w-full mt-2 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                  className="uz-input w-full mt-2"
                   inputMode="decimal"
                   disabled={isBusy}
                 />
 
-                <label className="mt-4 block text-xs text-zinc-400">
-                  Note (optional)
-                </label>
+                <label className="mt-4 block text-xs text-white/70">Note (optional)</label>
                 <input
                   value={txNote}
                   onChange={(e) => setTxNote(e.target.value)}
                   placeholder='e.g., "Lunch"'
-                  className="w-full mt-2 mb-4 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                  className="uz-input w-full mt-2 mb-4"
                   disabled={isBusy}
                 />
 
-                {/* ✅ CHANGED: button opens Preview instead of Phantom immediately */}
                 <button
                   onClick={openPreview}
                   disabled={!canSend || isBusy}
@@ -1467,26 +1435,22 @@ function HomeInner() {
                 </button>
 
                 {txStage === "signing" && (
-                  <div className="mt-2 text-xs text-zinc-400">
-                    Approve in Phantom…
-                  </div>
+                  <div className="mt-2 text-xs text-white/70">Approve in Phantom…</div>
                 )}
 
                 {txStage === "confirming" && (
-                  <div className="mt-2 text-xs text-zinc-400">
-                    Confirming on Solana…
-                  </div>
+                  <div className="mt-2 text-xs text-white/70">Confirming on Solana…</div>
                 )}
 
                 {showTxPanel && (
                   <div className="mt-4 text-xs">
-                    {txError && <div className="text-red-400">{txError}</div>}
+                    {txError && <div className="text-red-300">{txError}</div>}
                     {explorerUrl && (
                       <a
                         href={explorerUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-blue-400 underline"
+                        className="text-sky-200 underline"
                       >
                         View transaction →
                       </a>
@@ -1495,14 +1459,12 @@ function HomeInner() {
                 )}
 
                 {/* RECEIPT HISTORY */}
-                <div className="mt-5 rounded-2xl border border-white/10 bg-black/30 overflow-hidden">
+                <div className="mt-5 rounded-2xl overflow-hidden uz-subpanel">
                   <div className="px-4 py-3 border-b border-white/10">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-sm font-semibold text-white">
-                          Receipt History
-                        </div>
-                        <div className="mt-0.5 text-xs text-zinc-400">
+                        <div className="text-sm font-semibold text-white">Receipt History</div>
+                        <div className="mt-0.5 text-xs text-white/70">
                           Last 10 (filtered) • Local + Helius imported
                         </div>
                       </div>
@@ -1516,15 +1478,12 @@ function HomeInner() {
                               try {
                                 await syncHeliusUsdcReceipts(publicKey.toBase58());
                               } catch (e) {
-                                console.error(
-                                  "Helius sync failed (manual refresh):",
-                                  e
-                                );
+                                console.error("Helius sync failed (manual refresh):", e);
                               }
                             }
                             refreshReceiptsFromStorage();
                           }}
-                          className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10"
+                          className="uz-btn-secondary"
                         >
                           {isHeliusSyncing ? "Syncing…" : "Refresh"}
                         </button>
@@ -1533,7 +1492,7 @@ function HomeInner() {
                           type="button"
                           onClick={clearReceiptsHistory}
                           disabled={receipts.length === 0}
-                          className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="uz-btn-secondary disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Clear receipt history on this device"
                         >
                           Clear
@@ -1543,63 +1502,40 @@ function HomeInner() {
 
                     {/* Tabs */}
                     <div className="mt-3 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setReceiptTab("all")}
-                        className={[
-                          "rounded-lg px-3 py-2 text-xs border",
-                          receiptTab === "all"
-                            ? "bg-white text-black border-white/10"
-                            : "bg-white/5 border-white/10 hover:bg-white/10 text-zinc-200",
-                        ].join(" ")}
-                      >
-                        All
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setReceiptTab("sent")}
-                        className={[
-                          "rounded-lg px-3 py-2 text-xs border",
-                          receiptTab === "sent"
-                            ? "bg-white text-black border-white/10"
-                            : "bg-white/5 border-white/10 hover:bg-white/10 text-zinc-200",
-                        ].join(" ")}
-                      >
-                        Sent
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setReceiptTab("received")}
-                        className={[
-                          "rounded-lg px-3 py-2 text-xs border",
-                          receiptTab === "received"
-                            ? "bg-white text-black border-white/10"
-                            : "bg-white/5 border-white/10 hover:bg-white/10 text-zinc-200",
-                        ].join(" ")}
-                      >
-                        Received
-                      </button>
+                      {(["all", "sent", "received"] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setReceiptTab(t)}
+                          className={[
+                            "rounded-lg px-3 py-2 text-xs border",
+                            receiptTab === t
+                              ? "bg-white text-black border-white/10"
+                              : "bg-white/5 border-white/10 hover:bg-white/10 text-white",
+                          ].join(" ")}
+                        >
+                          {t === "all" ? "All" : t === "sent" ? "Sent" : "Received"}
+                        </button>
+                      ))}
                     </div>
 
                     <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="sm:col-span-2">
-                        <label className="text-xs text-zinc-400">Search</label>
+                        <label className="text-xs text-white/70">Search</label>
                         <input
                           value={receiptSearch}
                           onChange={(e) => setReceiptSearch(e.target.value)}
                           placeholder="Search by address, tx, note…"
-                          className="w-full mt-2 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                          className="uz-input w-full mt-2"
                         />
                       </div>
 
                       <div className="sm:col-span-1">
-                        <label className="text-xs text-zinc-400">Filter</label>
+                        <label className="text-xs text-white/70">Filter</label>
                         <select
                           value={receiptFilter}
-                          onChange={(e) =>
-                            setReceiptFilter(e.target.value as any)
-                          }
-                          className="w-full mt-2 rounded-lg bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20"
+                          onChange={(e) => setReceiptFilter(e.target.value as any)}
+                          className="uz-input w-full mt-2"
                         >
                           <option value="all">All</option>
                           <option value="confirmed">Confirmed</option>
@@ -1618,10 +1554,7 @@ function HomeInner() {
                         const fromShort = shortMid(r.from, 7, 7);
 
                         return (
-                          <div
-                            key={r.id}
-                            className="uz-receipt__tile px-4 py-3"
-                          >
+                          <div key={r.id} className="uz-receipt__tile px-4 py-3">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2 min-w-0 flex-wrap">
@@ -1640,54 +1573,46 @@ function HomeInner() {
                                       directionBadgeClasses(r.direction),
                                     ].join(" ")}
                                   >
-                                    {r.direction === "received"
-                                      ? "Received"
-                                      : "Sent"}
+                                    {r.direction === "received" ? "Received" : "Sent"}
                                   </span>
 
                                   <div className="text-sm font-semibold text-white truncate uz-receipt__amount">
                                     {amountPretty}{" "}
-                                    <span className="text-white/60 font-semibold">
+                                    <span className="text-white/70 font-semibold">
                                       USDC
                                     </span>
                                   </div>
                                 </div>
 
-                                <div className="mt-1 text-xs text-zinc-400">
+                                <div className="mt-1 text-xs text-white/70">
                                   {r.direction === "received" ? (
                                     <>
                                       From:{" "}
-                                      <span className="font-mono text-zinc-200">
-                                        {fromShort}
-                                      </span>
+                                      <span className="font-mono text-white">{fromShort}</span>
                                     </>
                                   ) : (
                                     <>
                                       To:{" "}
-                                      <span className="font-mono text-zinc-200">
-                                        {toShort}
-                                      </span>
+                                      <span className="font-mono text-white">{toShort}</span>
                                     </>
                                   )}
-                                  <span className="mx-2 text-zinc-600">•</span>
+                                  <span className="mx-2 text-white/40">•</span>
                                   {fmtWhen(r.createdAt)}
                                 </div>
 
                                 {r.note ? (
-                                  <div className="mt-1 text-[11px] text-zinc-300">
+                                  <div className="mt-1 text-[11px] text-white/80">
                                     Note:{" "}
-                                    <span className="text-white/80 font-semibold">
-                                      {r.note}
-                                    </span>
+                                    <span className="text-white font-semibold">{r.note}</span>
                                   </div>
                                 ) : null}
 
                                 {r.sig ? (
-                                  <div className="mt-1 text-[11px] text-zinc-500 font-mono break-all">
+                                  <div className="mt-1 text-[11px] text-white/60 font-mono break-all">
                                     Tx: {shortMid(r.sig, 10, 10)}
                                   </div>
                                 ) : (
-                                  <div className="mt-1 text-[11px] text-zinc-500">
+                                  <div className="mt-1 text-[11px] text-white/60">
                                     Tx: Pending signature…
                                   </div>
                                 )}
@@ -1700,7 +1625,7 @@ function HomeInner() {
                                     setActiveReceipt(r);
                                     setShowReceipt(true);
                                   }}
-                                  className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10"
+                                  className="uz-btn-secondary"
                                 >
                                   Open
                                 </button>
@@ -1712,7 +1637,7 @@ function HomeInner() {
                                     if (!r.sig) return;
                                     await copyText(r.sig);
                                   }}
-                                  className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                                  className="uz-btn-secondary disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                   Copy Tx
                                 </button>
@@ -1737,7 +1662,7 @@ function HomeInner() {
                       })}
                     </div>
                   ) : (
-                    <div className="px-4 py-4 text-sm text-zinc-400">
+                    <div className="px-4 py-4 text-sm text-white/70">
                       No receipts match this search/filter yet.
                     </div>
                   )}
@@ -1746,17 +1671,17 @@ function HomeInner() {
             </div>
           </section>
         ) : (
-          <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-8 sm:p-10 text-center">
-            <div className="text-xs text-zinc-400">UTILIZAP • Devnet Preview</div>
+          <section className="mt-6 uz-panel rounded-2xl p-8 sm:p-10 text-center">
+            <div className="text-xs text-white/70">UTILIZAP • Devnet Preview</div>
 
             <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight">
               Venmo-style USDC payments,
-              <span className="block text-zinc-200">Non-custodial. Instant.</span>
+              <span className="block text-white/90">Non-custodial. Instant.</span>
             </h1>
 
-            <p className="mt-4 max-w-2xl mx-auto text-sm sm:text-base text-zinc-300">
-              Connect your wallet to access the UTILIZAP dashboard and send USDC
-              with QR and on-chain confirmation.
+            <p className="mt-4 max-w-2xl mx-auto text-sm sm:text-base text-white/80">
+              Connect your wallet to access the UTILIZAP dashboard and send USDC with QR
+              and on-chain confirmation.
             </p>
 
             <div className="mt-6 flex justify-center">
@@ -1772,18 +1697,18 @@ function HomeInner() {
               )}
             </div>
 
-            <div className="mt-4 text-xs text-zinc-500">
+            <div className="mt-4 text-xs text-white/70">
               Utility first. Build first. Launch second.
             </div>
           </section>
         )}
 
-        <footer className="mt-8 text-center text-xs text-zinc-500">
+        <footer className="mt-8 text-center text-xs text-white/60">
           UTILIZAP • Non-custodial payments • Devnet environment
         </footer>
       </div>
 
-      {/* ✅ PREVIEW MODAL (BEFORE PHANTOM) — NOW WIRED TO .uz-preview__* */}
+      {/* ✅ PREVIEW MODAL (BEFORE PHANTOM) */}
       {showPreview && (
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
           <button
@@ -1802,7 +1727,7 @@ function HomeInner() {
                       <div className="text-sm font-semibold text-white">
                         Preview Transaction
                       </div>
-                      <div className="mt-0.5 text-xs text-zinc-300/80">
+                      <div className="mt-0.5 text-xs text-white/70">
                         Confirm details before Phantom opens
                       </div>
                     </div>
@@ -1818,51 +1743,26 @@ function HomeInner() {
 
                   <div className="px-5 py-5">
                     <div className="text-center">
-                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                      <div className="text-[11px] uppercase tracking-wider text-white/70">
                         Amount
                       </div>
                       <div className="mt-2 text-4xl font-extrabold tracking-tight text-white uz-preview__amount">
                         {previewAmountPretty}
-                        <span className="text-white/60 text-base font-semibold ml-2">
+                        <span className="text-white/70 text-base font-semibold ml-2">
                           USDC
                         </span>
                       </div>
                     </div>
 
-                    {selectedContact?.name ? (
-                      <div className="mt-3 text-center text-xs text-zinc-300/80">
-                        Paying{" "}
-                        <span className="text-white/90 font-semibold">
-                          {selectedContact.name}
-                        </span>
-                      </div>
-                    ) : null}
-
-                    {/* chips row */}
-                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                      <span className="uz-preview__chip">
-                        <span className="uz-preview__dot" />
-                        Devnet
-                      </span>
-                      <span className="uz-preview__chip">
-                        <span className="uz-preview__dot" />
-                        USDC
-                      </span>
-                      <span className="uz-preview__chip">
-                        <span className="uz-preview__dot" />
-                        Non-custodial
-                      </span>
-                    </div>
-
                     {previewWarn ? (
-                      <div className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
+                      <div className="mt-4 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-xs text-amber-100">
                         {previewWarn}
                       </div>
                     ) : null}
 
                     <div className="mt-5 rounded-2xl overflow-hidden uz-preview__panel">
                       <div className="px-4 py-3 border-b border-white/10">
-                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
                           To
                         </div>
                         <div className="mt-1 text-sm text-white font-mono break-all">
@@ -1871,7 +1771,7 @@ function HomeInner() {
                       </div>
 
                       <div className="px-4 py-3 border-b border-white/10">
-                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
                           From
                         </div>
                         <div className="mt-1 text-sm text-white font-mono break-all">
@@ -1880,7 +1780,7 @@ function HomeInner() {
                       </div>
 
                       <div className="px-4 py-3 border-b border-white/10">
-                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
                           Network
                         </div>
                         <div className="mt-1 text-sm text-white">Solana Devnet</div>
@@ -1889,7 +1789,7 @@ function HomeInner() {
                       <div className="px-4 py-3">
                         <div className="flex items-center justify-between gap-3">
                           <div>
-                            <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                            <div className="text-[11px] uppercase tracking-wider text-white/70">
                               Estimated Fee
                             </div>
                             <div className="mt-1 text-sm text-white">
@@ -1897,19 +1797,17 @@ function HomeInner() {
                             </div>
                           </div>
 
-                          <span className="uz-preview__chip">Est.</span>
+                          <span className="uz-chip">Est.</span>
                         </div>
                       </div>
                     </div>
 
                     {txNote.trim() ? (
                       <div className="mt-4 rounded-2xl px-4 py-3 uz-preview__panel">
-                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
                           Note
                         </div>
-                        <div className="mt-1 text-sm text-zinc-200">
-                          {txNote.trim()}
-                        </div>
+                        <div className="mt-1 text-sm text-white/80">{txNote.trim()}</div>
                       </div>
                     ) : null}
 
@@ -1921,7 +1819,7 @@ function HomeInner() {
                           onChange={(e) => setPreviewAck(e.target.checked)}
                           className="mt-0.5"
                         />
-                        <span className="text-xs text-zinc-200">
+                        <span className="text-xs text-white/80">
                           I confirm the recipient and amount are correct. I understand
                           blockchain transactions are typically irreversible.
                         </span>
@@ -1947,226 +1845,8 @@ function HomeInner() {
                       </button>
                     </div>
 
-                    <div className="mt-4 text-center text-[11px] text-zinc-400/70">
+                    <div className="mt-4 text-center text-[11px] text-white/60">
                       UTILIZAP • Preview step
-                    </div>
-                  </div>
-
-                  <div className="sm:hidden pb-3">
-                    <div className="mx-auto h-1.5 w-12 rounded-full bg-white/15" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* RECEIPT MODAL — NOW WIRED TO .uz-receipt__* */}
-      {showReceipt && activeReceipt && (
-        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/70"
-            onClick={() => setShowReceipt(false)}
-            aria-label="Close receipt"
-          />
-
-          <div className="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-6">
-            <div className="w-full sm:max-w-md">
-              <div className="uz-receipt__modalRing">
-                <div className="uz-receipt__modalSurface rounded-t-3xl sm:rounded-2xl overflow-hidden">
-                  <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-white">
-                        {modalTitle}
-                      </div>
-                      <div className="mt-0.5 text-xs text-zinc-400">
-                        {fmtWhen(activeReceipt.createdAt)}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={[
-                          "text-[11px] px-2 py-1 rounded-full border",
-                          activeReceipt.status === "confirmed"
-                            ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
-                            : activeReceipt.status === "failed"
-                            ? "border-red-400/30 bg-red-400/10 text-red-200"
-                            : "border-white/10 bg-white/5 text-zinc-200",
-                        ].join(" ")}
-                      >
-                        {activeReceipt.status === "confirmed"
-                          ? "Confirmed"
-                          : activeReceipt.status === "failed"
-                          ? "Failed"
-                          : activeReceipt.status === "confirming"
-                          ? "Confirming"
-                          : "Submitted"}
-                      </span>
-
-                      <span
-                        className={[
-                          "text-[11px] px-2 py-1 rounded-full border",
-                          modalAccent,
-                        ].join(" ")}
-                      >
-                        {activeReceipt.direction === "received" ? "Received" : "Sent"}
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={() => setShowReceipt(false)}
-                        className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10"
-                      >
-                        Close
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="px-5 py-5">
-                    <div className="text-center">
-                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">
-                        Amount
-                      </div>
-                      <div className="mt-2 text-4xl font-extrabold tracking-tight text-white uz-receipt__amount">
-                        {receiptAmountDisplay}
-                        <span className="text-white/60 text-base font-semibold ml-2">
-                          {receiptTokenDisplay}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 rounded-2xl overflow-hidden uz-receipt__panel">
-                      <div className="px-4 py-3 border-b border-white/10">
-                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
-                          To
-                        </div>
-                        <div className="mt-1 text-sm text-white font-mono break-all">
-                          {activeReceipt.to
-                            ? shortMid(activeReceipt.to, 10, 10)
-                            : "—"}
-                        </div>
-                      </div>
-
-                      <div className="px-4 py-3 border-b border-white/10">
-                        <div className="text-[11px] uppercase tracking-wider text-zinc-400">
-                          From
-                        </div>
-                        <div className="mt-1 text-sm text-white font-mono break-all">
-                          {activeReceipt.from
-                            ? shortMid(activeReceipt.from, 10, 10)
-                            : "—"}
-                        </div>
-                      </div>
-
-                      <div className="px-4 py-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="text-[11px] uppercase tracking-wider text-zinc-400">
-                              Transaction ID
-                            </div>
-                            <div className="mt-1 text-xs text-zinc-300 font-mono break-all">
-                              {activeReceipt.sig
-                                ? shortMid(activeReceipt.sig, 12, 12)
-                                : "Pending signature…"}
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            disabled={!activeReceipt.sig}
-                            onClick={async () => {
-                              if (!activeReceipt.sig) return;
-                              const ok = await copyText(activeReceipt.sig);
-                              if (ok) {
-                                setSigCopied(true);
-                                window.setTimeout(() => setSigCopied(false), 1200);
-                              }
-                            }}
-                            className="rounded-lg px-3 py-2 text-xs bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            {sigCopied ? "Copied ✓" : "Copy"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Notes */}
-                    <div className="mt-4">
-                      <label className="text-xs text-zinc-400">Note</label>
-                      <textarea
-                        value={receiptNoteDraft}
-                        onChange={(e) => setReceiptNoteDraft(e.target.value)}
-                        placeholder='e.g., "Lunch", "Gas", "Invoice #124"'
-                        className="w-full mt-2 rounded-xl bg-black/40 border border-white/10 p-3 text-sm outline-none focus:border-white/20 min-h-[86px]"
-                      />
-
-                      <div className="mt-2 flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            updateReceiptNote(activeReceipt.id, receiptNoteDraft);
-                            setNoteSavedTick(true);
-                            window.setTimeout(() => setNoteSavedTick(false), 1200);
-                          }}
-                          className="rounded-xl px-4 py-3 text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10"
-                        >
-                          {noteSavedTick ? "Saved ✓" : "Save Note"}
-                        </button>
-
-                        <span className="text-[11px] text-zinc-500">
-                          Notes save locally (this device)
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const text = activeReceipt.explorerUrl ?? "";
-                          if (!text) return;
-                          const ok = await copyText(text);
-                          if (ok) {
-                            setReceiptCopied(true);
-                            window.setTimeout(() => setReceiptCopied(false), 1200);
-                          }
-                        }}
-                        disabled={!activeReceipt.explorerUrl}
-                        className="rounded-xl px-4 py-3 text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {receiptCopied ? "Link Copied ✓" : "Copy Link"}
-                      </button>
-
-                      <a
-                        href={activeReceipt.explorerUrl ?? "#"}
-                        target="_blank"
-                        rel="noreferrer"
-                        className={[
-                          "rounded-xl px-4 py-3 text-sm font-semibold text-center",
-                          activeReceipt.explorerUrl
-                            ? "bg-white text-black hover:opacity-90"
-                            : "bg-white/10 text-white/40 pointer-events-none",
-                        ].join(" ")}
-                      >
-                        View on Explorer
-                      </a>
-                    </div>
-
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={resetForNewPayment}
-                        className="w-full rounded-xl px-4 py-3 text-sm font-semibold bg-emerald-500/20 border border-emerald-400/30 text-emerald-100 hover:bg-emerald-500/25"
-                      >
-                        New Payment
-                      </button>
-                    </div>
-
-                    <div className="mt-4 text-center text-[11px] text-zinc-500">
-                      UTILIZAP • {activeReceipt.cluster}
                     </div>
                   </div>
 
@@ -2183,23 +1863,12 @@ function HomeInner() {
       {/* Complete ✓ pop animation */}
       <style jsx>{`
         @keyframes uzCompletePop {
-          0% {
-            transform: scale(1);
-          }
-          45% {
-            transform: scale(1.06);
-          }
-          70% {
-            transform: scale(0.98);
-          }
-          100% {
-            transform: scale(1);
-          }
+          0% { transform: scale(1); }
+          45% { transform: scale(1.06); }
+          70% { transform: scale(0.98); }
+          100% { transform: scale(1); }
         }
-
-        .uz-complete-pop {
-          animation: uzCompletePop 420ms ease-out;
-        }
+        .uz-complete-pop { animation: uzCompletePop 420ms ease-out; }
       `}</style>
     </main>
   );
