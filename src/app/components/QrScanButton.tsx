@@ -18,7 +18,8 @@ type Props = {
 };
 
 const CHANNEL = "uz:qr:toggle";
-const AMOUNT_CHANNEL = "uz:qr:amount"; // optional: listen elsewhere to auto-fill amount
+const AMOUNT_CHANNEL = "uz:qr:amount"; // listen elsewhere to auto-fill amount
+const NOTE_CHANNEL = "uz:qr:note"; // ✅ NEW: listen elsewhere to auto-fill note
 
 function emitToggle(open: boolean) {
   if (typeof window === "undefined") return;
@@ -30,6 +31,11 @@ function emitAmount(amount: string) {
   window.dispatchEvent(new CustomEvent(AMOUNT_CHANNEL, { detail: { amount } }));
 }
 
+function emitNote(note: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(NOTE_CHANNEL, { detail: { note } }));
+}
+
 /**
  * Practical Solana base58 address check (no external deps).
  * Pubkeys are 32 bytes => base58 strings typically 32–44 chars.
@@ -39,21 +45,36 @@ function isLikelySolanaAddress(v: string) {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s);
 }
 
+function sanitizeAmount(raw?: string | null) {
+  const s = String(raw ?? "").trim();
+  if (!s) return undefined;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return s;
+}
+
+function sanitizeNote(raw?: string | null) {
+  const s = String(raw ?? "").trim();
+  if (!s) return undefined;
+  return s.slice(0, 140);
+}
+
 /**
- * Extract recipient (+ optional amount) from scanned QR.
+ * Extract recipient (+ optional amount + optional note) from scanned QR.
  * Supports:
  *  1) Plain address: "AKFwMNNV..."
  *  2) UTILIZAP request links:
- *       - https://app.utilizap.io/?to=<address>&amount=25
- *       - https://app.utilizap.io/request?to=<address>&amount=25
- *     (also supports aliases: recipient/address)
+ *       - https://app.utilizap.io/?to=<address>&amount=25&note=Lunch
+ *       - https://app.utilizap.io/request?to=<address>&amount=25&note=Lunch
+ *     (also supports aliases: recipient/address, amt)
  *  3) Solana Pay URI (optional support):
- *       - solana:<address>?amount=25&...
+ *       - solana:<address>?amount=25&label=...&message=...&memo=...
  */
 function parseScannedValue(raw: string): {
   ok: boolean;
   recipient?: string;
   amount?: string;
+  note?: string;
   reason?: string;
 } {
   const value = (raw || "").trim();
@@ -64,7 +85,7 @@ function parseScannedValue(raw: string): {
     return { ok: true, recipient: value };
   }
 
-  // 2) Solana Pay URI (optional, harmless to support)
+  // 2) Solana Pay URI (optional)
   if (value.toLowerCase().startsWith("solana:")) {
     const after = value.slice("solana:".length);
     const [addrPart, queryPart] = after.split("?");
@@ -72,11 +93,21 @@ function parseScannedValue(raw: string): {
 
     if (isLikelySolanaAddress(addr)) {
       let amount: string | undefined;
+      let note: string | undefined;
+
       if (queryPart) {
         const params = new URLSearchParams(queryPart);
-        amount = params.get("amount") || undefined;
+
+        amount = sanitizeAmount(params.get("amount"));
+
+        // Solana Pay commonly uses message/memo as a human note
+        note =
+          sanitizeNote(params.get("note")) ??
+          sanitizeNote(params.get("message")) ??
+          sanitizeNote(params.get("memo"));
       }
-      return { ok: true, recipient: addr, amount };
+
+      return { ok: true, recipient: addr, amount, note };
     }
   }
 
@@ -88,40 +119,46 @@ function parseScannedValue(raw: string): {
     const host = (url.host || "").toLowerCase();
     const isUtilizap =
       host === "app.utilizap.io" ||
-      host.endsWith(".utilizap.io") ||
       host === "utilizap.io" ||
       host.endsWith(".utilizap.io");
 
     if (!isUtilizap) {
-      // It might still be a URL someone uses, but we only want ours here
       return { ok: false, reason: "Not a UTILIZAP link or Solana address." };
     }
 
     const recipient =
-      url.searchParams.get("to") ||
-      url.searchParams.get("recipient") ||
-      url.searchParams.get("address") ||
-      "";
+      (url.searchParams.get("to") ||
+        url.searchParams.get("recipient") ||
+        url.searchParams.get("address") ||
+        "")!.trim();
 
-    const amount =
-      url.searchParams.get("amount") ||
-      url.searchParams.get("amt") ||
-      "";
+    const amount = sanitizeAmount(
+      url.searchParams.get("amount") || url.searchParams.get("amt")
+    );
+
+    const note = sanitizeNote(url.searchParams.get("note"));
 
     if (!recipient || !isLikelySolanaAddress(recipient)) {
-      return { ok: false, reason: "UTILIZAP link missing a valid ?to= address." };
+      return {
+        ok: false,
+        reason: "UTILIZAP link missing a valid ?to= address.",
+      };
     }
 
     return {
       ok: true,
       recipient,
-      amount: amount || undefined,
+      amount,
+      note,
     };
   } catch {
     // not a URL
   }
 
-  return { ok: false, reason: "QR not recognized. Use a Solana address or UTILIZAP request QR." };
+  return {
+    ok: false,
+    reason: "QR not recognized. Use a Solana address or UTILIZAP request QR.",
+  };
 }
 
 export default function QrScanButton({
@@ -206,9 +243,14 @@ export default function QrScanButton({
             // ✅ Set recipient
             onScan(parsed.recipient);
 
-            // ✅ Optional: auto-fill amount if present in UTILIZAP link / Solana Pay
+            // ✅ Auto-fill amount (if present)
             if (parsed.amount) {
               emitAmount(parsed.amount);
+            }
+
+            // ✅ Auto-fill note (if present)
+            if (parsed.note) {
+              emitNote(parsed.note);
             }
           },
           {
@@ -323,7 +365,8 @@ export default function QrScanButton({
           </div>
         )}
         <div className="absolute left-3 right-3 bottom-3 z-10 text-[11px] text-white/70">
-          Tip: Scan a plain Solana address OR a UTILIZAP request QR (app.utilizap.io with <span className="text-white/90">?to=</span>).
+          Tip: Scan a plain Solana address OR a UTILIZAP request QR
+          (app.utilizap.io with <span className="text-white/90">?to=</span>).
         </div>
       </div>
     </div>
