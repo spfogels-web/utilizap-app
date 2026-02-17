@@ -28,7 +28,6 @@ const USDC_MINT_DEVNET =
 
 // ✅ QR scanner amount auto-fill channel (emitted by QrScanButton when scanning UTILIZAP request QR)
 const UZ_QR_AMOUNT_EVENT = "uz:qr:amount";
-const UZ_QR_NOTE_EVENT = "uz:qr:note";
 
 function shortAddr(address: string) {
   return address.slice(0, 4) + "..." + address.slice(-4);
@@ -343,55 +342,7 @@ function HomeInner() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // ✅ NEW: Handle scan results that may be:
-  // - A raw Solana address
-  // - A UTILIZAP request URL like https://app.utilizap.io/?to=...&amount=...&note=...
-  function applyScanValue(rawValue: string) {
-    const value = String(rawValue ?? "").trim();
-    if (!value) return;
-
-    // If it's a URL, parse query params and fill recipient/amount/note
-    if (/^https?:\/\//i.test(value)) {
-      try {
-        const u = new URL(value);
-        const to = (u.searchParams.get("to") ?? "").trim();
-        const amt = (u.searchParams.get("amount") ?? "").trim();
-        const note = (u.searchParams.get("note") ?? "").trim();
-
-        let did = false;
-
-        if (to && isValidSolanaAddress(to)) {
-          setRecipient(to);
-          did = true;
-        }
-
-        if (amt) {
-          const n = Number(amt);
-          if (Number.isFinite(n) && n > 0) {
-            setAmount(amt);
-            did = true;
-          }
-        }
-
-        if (note) {
-          setTxNote(note);
-          did = true;
-        }
-
-        // If it WAS a URL but didn't have our params, don't block fallback
-        if (did) return;
-      } catch {
-        // fall through to address handling
-      }
-    }
-
-    // Fallback: treat scan as a plain address
-    if (isValidSolanaAddress(value)) {
-      setRecipient(value);
-    }
-  }
-
-  // ✅ Keep your existing QR amount event listener (backwards compatible)
+  // ✅ Listen for amount emitted by QR scan (UTILIZAP request QR)
   useEffect(() => {
     if (!mounted) return;
 
@@ -409,26 +360,6 @@ function HomeInner() {
     window.addEventListener(UZ_QR_AMOUNT_EVENT, handler as any);
     return () => window.removeEventListener(UZ_QR_AMOUNT_EVENT, handler as any);
   }, [mounted]);
-  // ✅ Listen for NOTE emitted by UTILIZAP request QR
-useEffect(() => {
-  if (!mounted) return;
-
-  const handler = (e: any) => {
-    const raw = e?.detail?.note;
-    if (!raw) return;
-
-    const clean = String(raw).trim();
-    if (!clean) return;
-
-    setTxNote(clean);
-  };
-
-  window.addEventListener("uz:qr:note", handler as any);
-
-  return () =>
-    window.removeEventListener("uz:qr:note", handler as any);
-}, [mounted]);
-
 
   function fmtWhen(ts: number) {
     try {
@@ -1331,9 +1262,7 @@ useEffect(() => {
                             USDC
                           </span>
                         </p>
-                        <p className="mt-1 text-sm text-white/60">
-                          Ready to send
-                        </p>
+                        <p className="mt-1 text-sm text-white/60">Ready to send</p>
                       </div>
 
                       <div className="uz-orb" aria-hidden="true" />
@@ -1352,9 +1281,7 @@ useEffect(() => {
                         </p>
                         <p className="mt-1 text-lg font-bold text-white">
                           {solPrecise}{" "}
-                          <span className="text-white/70 font-semibold">
-                            SOL
-                          </span>
+                          <span className="text-white/70 font-semibold">SOL</span>
                         </p>
                         <p className="mt-1 text-sm text-white/60">
                           Used for network fees
@@ -1498,10 +1425,8 @@ useEffect(() => {
                 {mounted ? (
                   <QrScanButton
                     mode="panel"
-                    validate={(v) =>
-                      isValidSolanaAddress(v.trim()) || /^https?:\/\//i.test(v)
-                    }
-                    onScan={(value) => applyScanValue(value)}
+                    validate={(v) => isValidSolanaAddress(v.trim())}
+                    onScan={(value) => setRecipient(value.trim())}
                     disabled={!connected || isBusy}
                   />
                 ) : null}
@@ -1532,10 +1457,8 @@ useEffect(() => {
                   {mounted ? (
                     <QrScanButton
                       mode="button"
-                      validate={(v) =>
-                        isValidSolanaAddress(v.trim()) || /^https?:\/\//i.test(v)
-                      }
-                      onScan={(value) => applyScanValue(value)}
+                      validate={(v) => isValidSolanaAddress(v.trim())}
+                      onScan={(value) => setRecipient(value.trim())}
                       disabled={!connected || isBusy}
                     />
                   ) : (
@@ -1544,8 +1467,6 @@ useEffect(() => {
                     </button>
                   )}
                 </div>
-
-                {/* ... EVERYTHING ELSE BELOW IS UNCHANGED FROM YOUR FILE ... */}
 
                 {/* Cash App / Venmo style: show ONLY a few "Recents" chips + a Contacts button */}
                 <div className="mb-4 rounded-2xl uz-subpanel p-4">
@@ -1587,6 +1508,7 @@ useEffect(() => {
                     </div>
                   )}
 
+                  {/* Recents chips (max 3) */}
                   {recentContactChips.length > 0 ? (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {recentContactChips.map((c) => {
@@ -1618,6 +1540,7 @@ useEffect(() => {
                     </div>
                   )}
 
+                  {/* Quick add (still on main screen like Venmo) */}
                   <div className="mt-4">
                     <div className="flex items-center justify-between">
                       <p className="text-xs text-white/70">Quick add</p>
@@ -1676,11 +1599,270 @@ useEffect(() => {
                   disabled={isBusy}
                 />
 
-                {/* ... the rest of your component stays exactly as-is ... */}
+                <button
+                  onClick={openPreview}
+                  disabled={!canSend || isBusy}
+                  className={[
+                    "uz-primary-btn w-full rounded-xl py-3 font-semibold text-white disabled:cursor-not-allowed",
+                    isConfirmed ? "uz-complete-pop" : "",
+                  ].join(" ")}
+                >
+                  {txStage === "signing" || txStage === "confirming"
+                    ? "Confirming…"
+                    : txStage === "confirmed"
+                    ? "Complete ✓"
+                    : isBusy
+                    ? "Processing…"
+                    : "Preview Transaction"}
+                </button>
 
-                {/* (KEEP YOUR EXISTING JSX BELOW; unchanged) */}
-                {/* NOTE: To keep this message readable, I didn’t re-paste the rest of the file here,
-                   because nothing below this point affects the note prefill bug. */}
+                {txStage === "signing" && (
+                  <div className="mt-2 text-xs text-white/70">
+                    Approve in Phantom…
+                  </div>
+                )}
+
+                {txStage === "confirming" && (
+                  <div className="mt-2 text-xs text-white/70">
+                    Confirming on Solana…
+                  </div>
+                )}
+
+                {/* RECEIPT HISTORY */}
+                <div className="mt-5 rounded-2xl overflow-hidden uz-subpanel">
+                  <div className="px-4 py-3 border-b border-white/10">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-white">
+                          Receipt History
+                        </div>
+                        <div className="mt-0.5 text-xs text-white/70">
+                          Last 10 (filtered) • Local + Helius imported
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            lastHeliusSyncRef.current = "";
+                            if (publicKey?.toBase58()) {
+                              try {
+                                await syncHeliusUsdcReceipts(publicKey.toBase58());
+                              } catch (e) {
+                                console.error(
+                                  "Helius sync failed (manual refresh):",
+                                  e
+                                );
+                              }
+                            }
+                            refreshReceiptsFromStorage();
+                          }}
+                          className="uz-btn-secondary"
+                        >
+                          {isHeliusSyncing ? "Syncing…" : "Refresh"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={clearReceiptsHistory}
+                          disabled={receipts.length === 0}
+                          className="uz-btn-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Clear receipt history on this device"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Tabs */}
+                    <div className="mt-3 flex items-center gap-2">
+                      {(["all", "sent", "received"] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setReceiptTab(t)}
+                          className={[
+                            "rounded-lg px-3 py-2 text-xs border",
+                            receiptTab === t
+                              ? "bg-white text-black border-white/10"
+                              : "bg-white/5 border-white/10 hover:bg-white/10 text-white",
+                          ].join(" ")}
+                        >
+                          {t === "all"
+                            ? "All"
+                            : t === "sent"
+                            ? "Sent"
+                            : "Received"}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="text-xs text-white/70">Search</label>
+                        <input
+                          value={receiptSearch}
+                          onChange={(e) => setReceiptSearch(e.target.value)}
+                          placeholder="Search by address, tx, note…"
+                          className="uz-input w-full mt-2"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-1">
+                        <label className="text-xs text-white/70">Filter</label>
+                        <select
+                          value={receiptFilter}
+                          onChange={(e) =>
+                            setReceiptFilter(e.target.value as any)
+                          }
+                          className="uz-input w-full mt-2"
+                        >
+                          <option value="all">All</option>
+                          <option value="confirmed">Confirmed</option>
+                          <option value="pending">Pending</option>
+                          <option value="failed">Failed</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {recentReceipts.length > 0 ? (
+                    <div className="p-3 space-y-3">
+                      {recentReceipts.map((r) => {
+                        const amountPretty = receiptAmountPretty(r.amountUi);
+                        const toShort = shortMid(r.to, 7, 7);
+                        const fromShort = shortMid(r.from, 7, 7);
+
+                        return (
+                          <div key={r.id} className="uz-receipt__tile px-4 py-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                                  <span
+                                    className={[
+                                      "text-[11px] px-2 py-0.5 rounded-full border",
+                                      receiptBadgeClasses(r.status),
+                                    ].join(" ")}
+                                  >
+                                    {receiptStatusLabel(r.status)}
+                                  </span>
+
+                                  <span
+                                    className={[
+                                      "text-[11px] px-2 py-0.5 rounded-full border",
+                                      directionBadgeClasses(r.direction),
+                                    ].join(" ")}
+                                  >
+                                    {r.direction === "received"
+                                      ? "Received"
+                                      : "Sent"}
+                                  </span>
+
+                                  <div className="text-sm font-semibold text-white truncate uz-receipt__amount">
+                                    {amountPretty}{" "}
+                                    <span className="text-white/70 font-semibold">
+                                      USDC
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="mt-1 text-xs text-white/70">
+                                  {r.direction === "received" ? (
+                                    <>
+                                      From:{" "}
+                                      <span className="font-mono text-white">
+                                        {fromShort}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      To:{" "}
+                                      <span className="font-mono text-white">
+                                        {toShort}
+                                      </span>
+                                    </>
+                                  )}
+                                  <span className="mx-2 text-white/40">•</span>
+                                  {fmtWhen(r.createdAt)}
+                                </div>
+
+                                {r.note ? (
+                                  <div className="mt-1 text-[11px] text-white/80">
+                                    Note:{" "}
+                                    <span className="text-white font-semibold">
+                                      {r.note}
+                                    </span>
+                                  </div>
+                                ) : null}
+
+                                {r.sig ? (
+                                  <div className="mt-1 text-[11px] text-white/60 font-mono break-all">
+                                    Tx: {shortMid(r.sig, 10, 10)}
+                                  </div>
+                                ) : (
+                                  <div className="mt-1 text-[11px] text-white/60">
+                                    Tx: Pending signature…
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex flex-col gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveReceipt(r);
+                                    setShowReceipt(true);
+                                  }}
+                                  className="uz-btn-secondary"
+                                >
+                                  Open
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={!r.sig}
+                                  onClick={async () => {
+                                    if (!r.sig) return;
+                                    const ok = await copyText(r.sig);
+                                    if (ok) {
+                                      setSigCopied(true);
+                                      window.setTimeout(
+                                        () => setSigCopied(false),
+                                        1200
+                                      );
+                                    }
+                                  }}
+                                  className="uz-btn-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                  {sigCopied ? "Copied ✓" : "Copy Tx"}
+                                </button>
+
+                                <a
+                                  href={r.explorerUrl ?? "#"}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className={[
+                                    "rounded-lg px-3 py-2 text-xs text-center border",
+                                    r.explorerUrl
+                                      ? "bg-white text-black border-white/10 hover:opacity-90"
+                                      : "bg-white/10 text-white/40 border-white/10 pointer-events-none",
+                                  ].join(" ")}
+                                >
+                                  Explorer
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-4 text-sm text-white/70">
+                      No receipts match this search/filter yet.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </section>
@@ -1694,8 +1876,8 @@ useEffect(() => {
             </h1>
 
             <p className="mt-4 max-w-2xl mx-auto text-sm sm:text-base text-white/80">
-              Connect your wallet to access the UTILIZAP dashboard and send USDC
-              with QR and on-chain confirmation.
+              Connect your wallet to access the UTILIZAP dashboard and send USDC with QR
+              and on-chain confirmation.
             </p>
 
             <div className="mt-6 flex justify-center">
@@ -1722,11 +1904,532 @@ useEffect(() => {
         </footer>
       </div>
 
-      {/* KEEP YOUR EXISTING MODALS/STYLES BELOW (unchanged) */}
-      {/* ✅ CONTACTS PICKER MODAL ... */}
-      {/* ✅ RECEIPT MODAL ... */}
-      {/* ✅ PREVIEW MODAL ... */}
-      {/* Complete ✓ pop animation ... */}
+      {/* ✅ CONTACTS PICKER MODAL (Cash App / Venmo style) */}
+      {contactsOpen && (
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="absolute inset-0 uz-preview__backdrop"
+            onClick={() => {
+              setContactsOpen(false);
+              setContactSearchQuery("");
+            }}
+            aria-label="Close contacts"
+          />
+
+          <div className="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-6">
+            <div className="w-full sm:max-w-md">
+              <div className="uz-preview__ring">
+                <div className="uz-preview__surface rounded-t-3xl sm:rounded-2xl overflow-hidden">
+                  <div className="uz-preview__header px-5 py-4 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white">
+                        Contacts
+                      </div>
+                      <div className="mt-0.5 text-xs text-white/70">
+                        Search • Tap to select • Unlimited
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContactsOpen(false);
+                        setContactSearchQuery("");
+                      }}
+                      className="uz-preview__secondary rounded-lg px-3 py-2 text-xs"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="px-5 pb-5">
+                    <div className="mt-3">
+                      <label className="text-xs text-white/70">Search</label>
+                      <input
+                        value={contactSearchQuery}
+                        onChange={(e) => setContactSearchQuery(e.target.value)}
+                        placeholder="Name or address…"
+                        className="uz-input w-full mt-2"
+                        autoFocus
+                      />
+                    </div>
+
+                    {contactsFiltered.length > 0 ? (
+                      <div className="mt-4 rounded-2xl overflow-hidden uz-subpanel">
+                        <div className="max-h-[420px] overflow-auto">
+                          {contactsFiltered.map((c) => {
+                            const isSelected =
+                              recipient.trim().toLowerCase() ===
+                              c.address.toLowerCase();
+
+                            return (
+                              <div
+                                key={c.id}
+                                className={[
+                                  "flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10 last:border-b-0",
+                                  isSelected
+                                    ? "bg-white/10"
+                                    : "hover:bg-white/[0.06]",
+                                ].join(" ")}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => chooseContact(c)}
+                                  disabled={isBusy}
+                                  className="text-left flex-1 min-w-0"
+                                  title="Use this contact"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                                    <span className="text-sm font-semibold text-white truncate">
+                                      {c.name}
+                                    </span>
+                                    {isSelected ? (
+                                      <span className="text-[11px] px-2 py-0.5 rounded-full border border-white/10 bg-white/10 text-white/90">
+                                        Selected
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-1 text-[11px] text-white/70 font-mono truncate">
+                                    {c.address}
+                                  </div>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => deleteContact(c.id)}
+                                  disabled={isBusy}
+                                  className="uz-btn-danger-soft"
+                                  title="Delete contact"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-2xl px-4 py-4 text-sm text-white/70 uz-subpanel">
+                        No contacts match that search.
+                      </div>
+                    )}
+
+                    <div className="sm:hidden pt-4">
+                      <div className="mx-auto h-1.5 w-12 rounded-full bg-white/15" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ RECEIPT MODAL (FINAL TRANSACTION RECEIPT + NOTE EDIT) */}
+      {showReceipt && activeReceipt && (
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="absolute inset-0 uz-preview__backdrop"
+            onClick={() => setShowReceipt(false)}
+            aria-label="Close receipt"
+          />
+
+          <div className="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-6">
+            <div className="w-full sm:max-w-md">
+              <div className="uz-preview__ring">
+                <div className="uz-preview__surface rounded-t-3xl sm:rounded-2xl overflow-hidden">
+                  <div className="uz-preview__header px-5 py-4 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="text-sm font-semibold text-white">
+                          {modalTitle}
+                        </div>
+                        <span
+                          className={[
+                            "text-[11px] px-2 py-0.5 rounded-full border",
+                            modalAccent,
+                          ].join(" ")}
+                        >
+                          {activeReceipt.status === "confirmed"
+                            ? "Confirmed"
+                            : activeReceipt.status === "failed"
+                            ? "Failed"
+                            : activeReceipt.status === "confirming"
+                            ? "Confirming"
+                            : "Submitted"}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-xs text-white/70">
+                        {fmtWhen(activeReceipt.createdAt)} • {activeReceipt.cluster}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowReceipt(false)}
+                      className="uz-preview__secondary rounded-lg px-3 py-2 text-xs"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="px-5 py-5">
+                    {/* Amount */}
+                    <div className="text-center">
+                      <div className="text-[11px] uppercase tracking-wider text-white/70">
+                        Amount
+                      </div>
+                      <div className="mt-2 text-4xl font-extrabold tracking-tight text-white uz-preview__amount">
+                        {receiptAmountDisplay}
+                        <span className="text-white/70 text-base font-semibold ml-2">
+                          USDC
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Details */}
+                    <div className="mt-5 rounded-2xl overflow-hidden uz-preview__panel">
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          To
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {activeReceipt.to
+                            ? shortMid(activeReceipt.to, 10, 10)
+                            : "—"}
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          From
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {activeReceipt.from
+                            ? shortMid(activeReceipt.from, 10, 10)
+                            : "—"}
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          Tx Signature
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {activeReceipt.sig
+                            ? shortMid(activeReceipt.sig, 14, 14)
+                            : "Pending…"}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Note editor */}
+                    <div className="mt-4 rounded-2xl px-4 py-3 uz-preview__panel">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          Note
+                        </div>
+                        {noteSavedTick ? (
+                          <span className="text-[11px] text-emerald-200">
+                            Saved ✓
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <input
+                        value={receiptNoteDraft}
+                        onChange={(e) => {
+                          setReceiptNoteDraft(e.target.value);
+                          setNoteSavedTick(false);
+                        }}
+                        placeholder='Add a note (e.g., "Rent", "Lunch")'
+                        className="uz-input w-full mt-2"
+                      />
+
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!activeReceipt) return;
+                            updateReceiptNote(activeReceipt.id, receiptNoteDraft);
+                            setNoteSavedTick(true);
+                            window.setTimeout(() => setNoteSavedTick(false), 1400);
+                          }}
+                          className="uz-btn-secondary"
+                        >
+                          Save Note
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReceiptNoteDraft("");
+                            setNoteSavedTick(false);
+                            if (!activeReceipt) return;
+                            updateReceiptNote(activeReceipt.id, "");
+                            setNoteSavedTick(true);
+                            window.setTimeout(() => setNoteSavedTick(false), 1400);
+                          }}
+                          className="uz-btn-secondary"
+                        >
+                          Clear Note
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!activeReceipt?.sig) return;
+                          const ok = await copyText(activeReceipt.sig);
+                          if (ok) {
+                            setSigCopied(true);
+                            window.setTimeout(() => setSigCopied(false), 1200);
+                          }
+                        }}
+                        disabled={!activeReceipt.sig}
+                        className="uz-preview__secondary rounded-xl px-4 py-3 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {sigCopied ? "Copied ✓" : "Copy Tx"}
+                      </button>
+
+                      <a
+                        href={activeReceipt.explorerUrl ?? "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={[
+                          "uz-preview__primary rounded-xl px-4 py-3 text-sm font-semibold text-center",
+                          activeReceipt.explorerUrl
+                            ? ""
+                            : "pointer-events-none opacity-40",
+                        ].join(" ")}
+                      >
+                        Explorer →
+                      </a>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!receiptShareLink) return;
+                          const ok = await copyText(receiptShareLink);
+                          if (ok) {
+                            setReceiptCopied(true);
+                            window.setTimeout(() => setReceiptCopied(false), 1200);
+                          }
+                        }}
+                        disabled={!receiptShareLink}
+                        className="uz-preview__secondary rounded-xl px-4 py-3 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {receiptCopied ? "Copied ✓" : "Copy Receipt Link"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowReceipt(false);
+                          resetForNewPayment();
+                        }}
+                        className="uz-preview__primary rounded-xl px-4 py-3 text-sm font-semibold"
+                      >
+                        New Payment →
+                      </button>
+                    </div>
+
+                    <div className="mt-4 text-center text-[11px] text-white/60">
+                      UTILIZAP • Receipt
+                    </div>
+                  </div>
+
+                  <div className="sm:hidden pb-3">
+                    <div className="mx-auto h-1.5 w-12 rounded-full bg-white/15" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ PREVIEW MODAL (BEFORE PHANTOM) */}
+      {showPreview && (
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="absolute inset-0 uz-preview__backdrop"
+            onClick={() => setShowPreview(false)}
+            aria-label="Close preview"
+          />
+
+          <div className="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-6">
+            <div className="w-full sm:max-w-md">
+              <div className="uz-preview__ring">
+                <div className="uz-preview__surface rounded-t-3xl sm:rounded-2xl overflow-hidden">
+                  <div className="uz-preview__header px-5 py-4 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white">
+                        Preview Transaction
+                      </div>
+                      <div className="mt-0.5 text-xs text-white/70">
+                        Confirm details before Phantom opens
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPreview(false)}
+                      className="uz-preview__secondary rounded-lg px-3 py-2 text-xs"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="px-5 py-5">
+                    <div className="text-center">
+                      <div className="text-[11px] uppercase tracking-wider text-white/70">
+                        Amount
+                      </div>
+                      <div className="mt-2 text-4xl font-extrabold tracking-tight text-white uz-preview__amount">
+                        {previewAmountPretty}
+                        <span className="text-white/70 text-base font-semibold ml-2">
+                          USDC
+                        </span>
+                      </div>
+                    </div>
+
+                    {previewWarn ? (
+                      <div className="mt-4 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-xs text-amber-100">
+                        {previewWarn}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-5 rounded-2xl overflow-hidden uz-preview__panel">
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          To
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {previewTo ? shortMid(previewTo, 10, 10) : "—"}
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          From
+                        </div>
+                        <div className="mt-1 text-sm text-white font-mono break-all">
+                          {previewFrom ? shortMid(previewFrom, 10, 10) : "—"}
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          Network
+                        </div>
+                        <div className="mt-1 text-sm text-white">Solana Devnet</div>
+                      </div>
+
+                      <div className="px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-wider text-white/70">
+                              Estimated Fee
+                            </div>
+                            <div className="mt-1 text-sm text-white">
+                              {previewFeeLoading ? "Calculating…" : previewFeeText}
+                            </div>
+                          </div>
+
+                          <span className="uz-chip">Est.</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {txNote.trim() ? (
+                      <div className="mt-4 rounded-2xl px-4 py-3 uz-preview__panel">
+                        <div className="text-[11px] uppercase tracking-wider text-white/70">
+                          Note
+                        </div>
+                        <div className="mt-1 text-sm text-white/80">
+                          {txNote.trim()}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 rounded-2xl px-4 py-3 uz-preview__panel">
+                      <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={previewAck}
+                          onChange={(e) => setPreviewAck(e.target.checked)}
+                          className="mt-0.5"
+                        />
+                        <span className="text-xs text-white/80">
+                          I confirm the recipient and amount are correct. I understand
+                          blockchain transactions are typically irreversible.
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowPreview(false)}
+                        className="uz-preview__secondary rounded-xl px-4 py-3 text-sm font-semibold"
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={continueToPhantom}
+                        disabled={!previewAck || isBusy || !canSend}
+                        className="uz-preview__primary rounded-xl px-4 py-3 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Continue to Phantom →
+                      </button>
+                    </div>
+
+                    <div className="mt-4 text-center text-[11px] text-white/60">
+                      UTILIZAP • Preview step
+                    </div>
+                  </div>
+
+                  <div className="sm:hidden pb-3">
+                    <div className="mx-auto h-1.5 w-12 rounded-full bg-white/15" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Complete ✓ pop animation */}
+      <style jsx>{`
+        @keyframes uzCompletePop {
+          0% {
+            transform: scale(1);
+          }
+          45% {
+            transform: scale(1.06);
+          }
+          70% {
+            transform: scale(0.98);
+          }
+          100% {
+            transform: scale(1);
+          }
+        }
+        .uz-complete-pop {
+          animation: uzCompletePop 420ms ease-out;
+        }
+      `}</style>
     </main>
   );
 }
