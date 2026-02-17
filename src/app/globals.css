@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
-/* ================================
-   UTILIZAP — Theme Variables
-   ================================ */
+/* =========================================================
+   UTILIZAP — global.css (REPLACE ALL)
+   Goal (per your screenshot):
+   ✅ Keep WHITE FONT exactly as-is (do NOT brighten text)
+   ✅ Make LEFT wallet area match RIGHT side depth
+      - darker around the EDGES of the money card ($927)
+      - darker at the TOP around "Connected Wallet"
+   ✅ Do this with overlays (no color changes to text)
+   ========================================================= */
 
 :root {
   --background: #05020a;
@@ -22,15 +28,19 @@
   --uz-input: 20, 10, 35;
 
   /* Status RGBs */
-  --uz-green: 16, 185, 129;  /* confirmed */
-  --uz-amber: 245, 158, 11;  /* sent/pending */
-  --uz-red: 239, 68, 68;     /* failed */
+  --uz-green: 16, 185, 129;
+  --uz-amber: 245, 158, 11;
+  --uz-red: 239, 68, 68;
 }
 
-html, body {
+html,
+body {
+  height: 100%;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ================================
@@ -44,36 +54,24 @@ html, body {
     linear-gradient(180deg, rgba(0,0,0,0.20), rgba(0,0,0,0.55));
 }
 
-/* ============================================================
-   ✅ ONE TRUE PANEL STYLE (QR PANEL LOOK)
-   ============================================================ */
-.uz-panel-unified {
-  background:
-    radial-gradient(900px 520px at 18% 0%, rgba(var(--uz-panelA), 0.55), transparent 58%),
-    radial-gradient(760px 520px at 85% 10%, rgba(var(--uz-panelB), 0.30), transparent 62%),
-    linear-gradient(180deg, rgba(var(--uz-panelA), 0.22), rgba(var(--uz-panelBase), 0.96)) !important;
-
-  border: 1px solid rgba(var(--uz-panelA), 0.35) !important;
-
-  box-shadow:
-    0 18px 60px rgba(var(--uz-panelA), 0.22),
-    0 12px 40px rgba(var(--uz-panelB), 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
-
-  backdrop-filter: blur(16px);
+/* =========================================================
+   IMPORTANT: Do NOT modify base text colors globally
+   (this keeps your white font exactly the same)
+   ========================================================= */
+p, h1, h2, h3, h4, h5, h6, span, label, div, button, a {
+  color: inherit;
 }
 
-/* Apply unified style to YOUR actual panel classes used in page.tsx */
+/* =========================================================
+   ✅ PANEL LOOK (same as right side)
+   ========================================================= */
 .uz-panel,
-.uz-subpanel,
-.uz-card,
 .uz-shellHeader {
   border-radius: 18px;
-}
-.uz-panel,
-.uz-subpanel,
-.uz-card,
-.uz-shellHeader {
+  backdrop-filter: blur(16px);
+  position: relative;
+  overflow: hidden;
+
   background:
     radial-gradient(900px 520px at 18% 0%, rgba(var(--uz-panelA), 0.55), transparent 58%),
     radial-gradient(760px 520px at 85% 10%, rgba(var(--uz-panelB), 0.30), transparent 62%),
@@ -85,14 +83,105 @@ html, body {
     0 18px 60px rgba(var(--uz-panelA), 0.22),
     0 12px 40px rgba(var(--uz-panelB), 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
-
-  backdrop-filter: blur(16px);
 }
 
-/* ============================================================
-   ✅ Tailwind “glass” utility overrides (SITE ONLY)
-   NOTE: Preview modal is explicitly styled below to avoid conflicts.
-   ============================================================ */
+/* =========================================================
+   INNER BLOCKS (subpanel + card)
+   - Keep same vibe, but slightly calmer so stacking
+     doesn’t blow out the left side.
+   ========================================================= */
+.uz-subpanel,
+.uz-card {
+  border-radius: 18px;
+  backdrop-filter: blur(16px);
+  position: relative;
+  overflow: hidden;
+
+  background:
+    radial-gradient(900px 520px at 18% 0%, rgba(var(--uz-panelA), 0.42), transparent 58%),
+    radial-gradient(760px 520px at 85% 10%, rgba(var(--uz-panelB), 0.22), transparent 62%),
+    linear-gradient(180deg, rgba(var(--uz-panelA), 0.18), rgba(var(--uz-panelBase), 0.94)) !important;
+
+  border: 1px solid rgba(var(--uz-panelA), 0.32) !important;
+
+  box-shadow:
+    0 14px 44px rgba(var(--uz-panelA), 0.18),
+    0 10px 30px rgba(var(--uz-panelB), 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
+}
+
+/* =========================================================
+   ✅ DARK EDGE + TOP SHADING (THE FIX YOU WANT)
+   This darkens the EDGES around:
+   - Connected Wallet area (top of subpanel)
+   - Money card ($927)
+   WITHOUT changing text color.
+   ========================================================= */
+
+/* Connected Wallet + top area shade */
+.uz-subpanel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+
+  /* TOP + EDGE vignette */
+  background:
+    linear-gradient(
+      180deg,
+      rgba(0,0,0,0.40) 0%,
+      rgba(0,0,0,0.18) 40%,
+      transparent 78%
+    ),
+    radial-gradient(
+      140% 120% at 50% 10%,
+      rgba(0,0,0,0.35) 0%,
+      transparent 62%
+    ),
+    radial-gradient(
+      120% 120% at 50% 50%,
+      transparent 55%,
+      rgba(0,0,0,0.35) 100%
+    );
+
+  pointer-events: none;
+}
+
+/* Money panel edge darkness (vignette around $927 area) */
+.uz-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+
+  /* stronger edge vignette + slight top */
+  background:
+    linear-gradient(
+      180deg,
+      rgba(0,0,0,0.34) 0%,
+      rgba(0,0,0,0.10) 42%,
+      transparent 78%
+    ),
+    radial-gradient(
+      120% 120% at 50% 50%,
+      transparent 54%,
+      rgba(0,0,0,0.42) 100%
+    );
+
+  pointer-events: none;
+}
+
+/* Make sure text always sits ABOVE overlays */
+.uz-panel *,
+.uz-shellHeader *,
+.uz-subpanel *,
+.uz-card * {
+  position: relative;
+  z-index: 1;
+}
+
+/* =========================================================
+   Tailwind glass overrides (small blocks inside)
+   Keep consistent with right side, without touching text.
+   ========================================================= */
 .bg-black\/40,
 .bg-black\/30,
 .bg-black\/20,
@@ -101,28 +190,27 @@ html, body {
 .bg-white\/5,
 .bg-white\/\[0\.03\] {
   background:
-    radial-gradient(900px 520px at 18% 0%, rgba(var(--uz-panelA), 0.55), transparent 58%),
-    radial-gradient(760px 520px at 85% 10%, rgba(var(--uz-panelB), 0.30), transparent 62%),
-    linear-gradient(180deg, rgba(var(--uz-panelA), 0.22), rgba(var(--uz-panelBase), 0.96)) !important;
+    radial-gradient(900px 520px at 18% 0%, rgba(var(--uz-panelA), 0.42), transparent 58%),
+    radial-gradient(760px 520px at 85% 10%, rgba(var(--uz-panelB), 0.22), transparent 62%),
+    linear-gradient(180deg, rgba(var(--uz-panelA), 0.16), rgba(var(--uz-panelBase), 0.94)) !important;
 
-  border-color: rgba(var(--uz-panelA), 0.35) !important;
+  border-color: rgba(var(--uz-panelA), 0.30) !important;
 
   box-shadow:
-    0 18px 60px rgba(var(--uz-panelA), 0.22),
-    0 12px 40px rgba(var(--uz-panelB), 0.12),
+    0 14px 44px rgba(var(--uz-panelA), 0.16),
+    0 10px 30px rgba(var(--uz-panelB), 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
 
   backdrop-filter: blur(16px);
 }
 
-/* Keep the base page background dark */
 .bg-black:not(.bg-black\/40):not(.bg-black\/30):not(.bg-black\/20):not(.bg-black\/10) {
   background: #05020a !important;
 }
 
-/* ============================================================
-   INPUTS / SELECTS / TEXTAREAS + uz-input helper
-   ============================================================ */
+/* =========================================================
+   INPUTS / SELECTS / TEXTAREAS + uz-input
+   ========================================================= */
 .uz-input,
 input,
 select,
@@ -313,15 +401,14 @@ textarea:focus {
 
 .uz-btn-clear:disabled { opacity: 0.85; cursor: not-allowed; }
 
-/* ============================================================
-   ✅ PREVIEW MODAL — FORCE PREMIUM THEME (FIXES “BLANK”)
-   ============================================================ */
+/* =========================================================
+   PREVIEW MODAL (unchanged look)
+   ========================================================= */
 .uz-preview__backdrop {
   background: rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(12px);
 }
 
-/* Outer glow ring */
 .uz-preview__ring {
   background:
     radial-gradient(500px 200px at 40% 0%, rgba(var(--uz-purple), 0.45), transparent 60%),
@@ -334,7 +421,6 @@ textarea:focus {
     0 18px 52px rgba(var(--uz-purple), 0.20);
 }
 
-/* Main surface */
 .uz-preview__surface {
   background:
     radial-gradient(900px 520px at 18% 0%, rgba(var(--uz-purple), 0.55), transparent 58%),
@@ -349,24 +435,20 @@ textarea:focus {
     inset 0 0 0 1px rgba(var(--uz-purple), 0.12) !important;
 }
 
-/* Header strip */
 .uz-preview__header {
   background: rgba(0,0,0,0.25) !important;
   border-bottom: 1px solid rgba(255,255,255,0.10) !important;
 }
 
-/* Inner panels */
 .uz-preview__panel {
   background: rgba(0,0,0,0.30) !important;
   border: 1px solid rgba(255,255,255,0.10) !important;
 }
 
-/* Amount styling */
 .uz-preview__amount {
   text-shadow: 0 10px 30px rgba(0,0,0,0.55);
 }
 
-/* Buttons inside preview */
 .uz-preview__primary {
   background: linear-gradient(135deg, rgba(var(--uz-blue), 0.95), rgba(var(--uz-purple), 0.95)) !important;
   border: 1px solid rgba(255,255,255,0.16) !important;
@@ -385,10 +467,9 @@ textarea:focus {
 }
 .uz-preview__secondary:hover:not(:disabled) { background: rgba(255,255,255,0.10) !important; }
 
-/* ============================================================
-   ✅ STATUS ACCENTS (sent / confirmed / failed)
-   Use these optionally in UI if you want later.
-   ============================================================ */
+/* =========================================================
+   STATUS ACCENTS (optional)
+   ========================================================= */
 .uz-status-chip {
   display: inline-flex;
   align-items: center;

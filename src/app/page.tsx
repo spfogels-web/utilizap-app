@@ -187,6 +187,10 @@ type Contact = {
 
 const CONTACTS_KEY = "uz_contacts_v1";
 
+// NEW: keep "last used" separately so your existing contacts keep working
+type ContactMetaStore = Record<string, { lastUsedAt: number }>;
+const CONTACTS_META_KEY = "uz_contacts_meta_v1";
+
 function safeParseContacts(raw: string | null): Contact[] {
   if (!raw) return [];
   try {
@@ -218,6 +222,44 @@ function loadContacts(): Contact[] {
 function saveContacts(next: Contact[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(CONTACTS_KEY, JSON.stringify(next));
+}
+
+function safeParseMeta(raw: string | null): ContactMetaStore {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: ContactMetaStore = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      const lastUsedAt = (v as any)?.lastUsedAt;
+      if (typeof lastUsedAt === "number" && Number.isFinite(lastUsedAt)) {
+        out[k] = { lastUsedAt };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function loadContactsMeta(): ContactMetaStore {
+  if (typeof window === "undefined") return {};
+  return safeParseMeta(window.localStorage.getItem(CONTACTS_META_KEY));
+}
+
+function saveContactsMeta(next: ContactMetaStore) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(CONTACTS_META_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
+
+function touchContactMeta(id: string) {
+  const meta = loadContactsMeta();
+  meta[id] = { lastUsedAt: Date.now() };
+  saveContactsMeta(meta);
 }
 
 function makeId() {
@@ -278,6 +320,10 @@ function HomeInner() {
   // Contacts
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactName, setContactName] = useState("");
+
+  // Cash App / Venmo-style contact picker
+  const [contactsOpen, setContactsOpen] = useState(false);
+  const [contactSearchQuery, setContactSearchQuery] = useState("");
 
   // --------------------
   // ✅ PREVIEW TRANSACTION (before Phantom)
@@ -441,7 +487,9 @@ function HomeInner() {
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
       try {
-        const el = document.getElementById("uz-request-link") as HTMLInputElement;
+        const el = document.getElementById(
+          "uz-request-link"
+        ) as HTMLInputElement;
         if (el) {
           el.focus();
           el.select();
@@ -549,7 +597,10 @@ function HomeInner() {
   // Auto-open receipt when confirmed/failed
   useEffect(() => {
     if (!activeReceipt) return;
-    if (activeReceipt.status === "confirmed" || activeReceipt.status === "failed") {
+    if (
+      activeReceipt.status === "confirmed" ||
+      activeReceipt.status === "failed"
+    ) {
       setShowReceipt(true);
     }
   }, [activeReceipt]);
@@ -586,8 +637,43 @@ function HomeInner() {
   const selectedContact = useMemo(() => {
     const r = recipient.trim().toLowerCase();
     if (!r) return null;
-    return contacts.find((c) => c.address.trim().toLowerCase() === r) ?? null;
+    return (
+      contacts.find((c) => c.address.trim().toLowerCase() === r) ?? null
+    );
   }, [contacts, recipient]);
+
+  // Cash App-ish ordering: Recents first, then A-Z
+  const contactsSorted = useMemo(() => {
+    const meta = loadContactsMeta();
+    const collator = new Intl.Collator(undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+
+    const list = [...contacts];
+    list.sort((a, b) => {
+      const aLast = meta[a.id]?.lastUsedAt ?? 0;
+      const bLast = meta[b.id]?.lastUsedAt ?? 0;
+      if (aLast !== bLast) return bLast - aLast;
+      return collator.compare(a.name, b.name);
+    });
+    return list;
+  }, [contacts]);
+
+  const contactsFiltered = useMemo(() => {
+    const q = contactSearchQuery.trim().toLowerCase();
+    if (!q) return contactsSorted;
+
+    return contactsSorted.filter((c) => {
+      const hay = `${c.name} ${c.address}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [contactsSorted, contactSearchQuery]);
+
+  const recentContactChips = useMemo(() => {
+    // show up to 3 chips (Cash App-ish), the full list is inside the picker
+    return contactsSorted.slice(0, 3);
+  }, [contactsSorted]);
 
   function receiptBadgeClasses(status: TxReceiptStatus) {
     if (status === "confirmed")
@@ -644,7 +730,8 @@ function HomeInner() {
         if (!sig) continue;
 
         const tokenTransfers = (tx as any)?.tokenTransfers || [];
-        if (!Array.isArray(tokenTransfers) || tokenTransfers.length === 0) continue;
+        if (!Array.isArray(tokenTransfers) || tokenTransfers.length === 0)
+          continue;
 
         // NET relative to wallet: + received, - sent
         let net = 0;
@@ -667,9 +754,11 @@ function HomeInner() {
             else if (typeof raw.uiAmountString === "string")
               amt = Number(raw.uiAmountString);
             else if (typeof raw.amount === "string") {
-              const decimals = typeof raw.decimals === "number" ? raw.decimals : 0;
+              const decimals =
+                typeof raw.decimals === "number" ? raw.decimals : 0;
               const intVal = Number(raw.amount);
-              if (Number.isFinite(intVal)) amt = intVal / Math.pow(10, decimals);
+              if (Number.isFinite(intVal))
+                amt = intVal / Math.pow(10, decimals);
             }
           }
 
@@ -715,12 +804,17 @@ function HomeInner() {
         const direction: TxReceiptDirection = net >= 0 ? "received" : "sent";
         const amountAbs = Math.abs(net);
 
-        const tsSeconds = (tx as any)?.timestamp ?? (tx as any)?.blockTime ?? null;
+        const tsSeconds =
+          (tx as any)?.timestamp ?? (tx as any)?.blockTime ?? null;
 
         const createdAt =
-          typeof tsSeconds === "number" && tsSeconds > 0 ? tsSeconds * 1000 : Date.now();
+          typeof tsSeconds === "number" && tsSeconds > 0
+            ? tsSeconds * 1000
+            : Date.now();
 
-        const status: TxReceiptStatus = heliusHasError(tx) ? "failed" : "confirmed";
+        const status: TxReceiptStatus = heliusHasError(tx)
+          ? "failed"
+          : "confirmed";
 
         const id = `h_${sig}`;
 
@@ -806,10 +900,15 @@ function HomeInner() {
       return hay.includes(q);
     }
 
-    return receipts.filter((r) => matchesFilter(r) && matchesTab(r) && matchesQuery(r));
+    return receipts.filter(
+      (r) => matchesFilter(r) && matchesTab(r) && matchesQuery(r)
+    );
   }, [receipts, receiptSearch, receiptFilter, receiptTab]);
 
-  const recentReceipts = useMemo(() => filteredReceipts.slice(0, 10), [filteredReceipts]);
+  const recentReceipts = useMemo(
+    () => filteredReceipts.slice(0, 10),
+    [filteredReceipts]
+  );
 
   const onSendUsdc = async () => {
     const from = publicKey?.toBase58() ?? "";
@@ -843,13 +942,14 @@ function HomeInner() {
       setReceipts(loadReceipts());
       setActiveReceipt(receiptDraft);
 
-      const { signature, blockhash, lastValidBlockHeight } = await sendUsdcDevnet({
-        connection,
-        sender: publicKey!,
-        recipient: new PublicKey(to),
-        amountUi,
-        signTransaction: signTransaction!,
-      });
+      const { signature, blockhash, lastValidBlockHeight } =
+        await sendUsdcDevnet({
+          connection,
+          sender: publicKey!,
+          recipient: new PublicKey(to),
+          amountUi,
+          signTransaction: signTransaction!,
+        });
 
       setTxSig(signature);
       setTxStage("confirming");
@@ -908,14 +1008,25 @@ function HomeInner() {
   const usdcCash = usdcBalance === null ? "—" : formatUsd(usdcBalance);
   const solPrecise = solBalance === null ? "—" : solBalance.toFixed(4);
 
-  function chooseContact(address: string) {
-    setRecipient(address);
+  function chooseContact(c: Contact) {
+    setRecipient(c.address);
+    touchContactMeta(c.id);
+    setContactsOpen(false);
+    setContactSearchQuery("");
   }
 
   function deleteContact(id: string) {
     setContacts((prev) => {
       const next = prev.filter((c) => c.id !== id);
       saveContacts(next);
+
+      // also clean meta
+      const meta = loadContactsMeta();
+      if (meta[id]) {
+        delete meta[id];
+        saveContactsMeta(meta);
+      }
+
       return next;
     });
   }
@@ -939,12 +1050,17 @@ function HomeInner() {
       return next;
     });
 
+    // mark as used so it appears in recents immediately
+    touchContactMeta(newContact.id);
+
     setContactName("");
   }
 
   const modalTitle = useMemo(() => {
     if (!activeReceipt) return "Transaction Receipt";
-    return activeReceipt.direction === "received" ? "Payment Received" : "Payment Sent";
+    return activeReceipt.direction === "received"
+      ? "Payment Received"
+      : "Payment Sent";
   }, [activeReceipt]);
 
   const modalAccent = useMemo(() => {
@@ -962,7 +1078,8 @@ function HomeInner() {
       params.set("to", activeReceipt.to);
 
       const n = Number(activeReceipt.amountUi);
-      if (Number.isFinite(n) && n > 0) params.set("amount", String(activeReceipt.amountUi));
+      if (Number.isFinite(n) && n > 0)
+        params.set("amount", String(activeReceipt.amountUi));
 
       const note = (activeReceipt.note ?? "").trim();
       if (note) params.set("note", note.slice(0, 140));
@@ -977,7 +1094,10 @@ function HomeInner() {
   // ✅ PREVIEW helpers
   // --------------------
   const previewTo = useMemo(() => recipient.trim(), [recipient]);
-  const previewFrom = useMemo(() => publicKey?.toBase58() ?? "", [publicKey]);
+  const previewFrom = useMemo(
+    () => publicKey?.toBase58() ?? "",
+    [publicKey]
+  );
   const previewAmountPretty = useMemo(() => {
     const n = Number(amount);
     if (Number.isFinite(n) && n > 0) return formatUsd(n);
@@ -1023,12 +1143,14 @@ function HomeInner() {
 
       const msg = tx.compileMessage();
       const feeLamports = await connection.getFeeForMessage(msg, "confirmed");
-      const lamports = typeof feeLamports?.value === "number" ? feeLamports.value : null;
+      const lamports =
+        typeof feeLamports?.value === "number" ? feeLamports.value : null;
 
       if (lamports === null) return "—";
 
       const sol = lamports / LAMPORTS_PER_SOL;
-      const pretty = sol === 0 ? "0" : sol < 0.0001 ? sol.toFixed(6) : sol.toFixed(4);
+      const pretty =
+        sol === 0 ? "0" : sol < 0.0001 ? sol.toFixed(6) : sol.toFixed(4);
       return `${pretty} SOL (est.)`;
     } catch {
       return "—";
@@ -1114,7 +1236,9 @@ function HomeInner() {
             <div className="uz-panel rounded-2xl p-5 sm:p-6">
               <div className="flex items-center justify-between gap-4">
                 <h2 className="text-lg font-bold">Wallet</h2>
-                <span className="text-xs text-white/70">Secure • Non-custodial</span>
+                <span className="text-xs text-white/70">
+                  Secure • Non-custodial
+                </span>
               </div>
 
               <div className="mt-4 rounded-xl uz-subpanel p-4 space-y-4">
@@ -1144,7 +1268,9 @@ function HomeInner() {
                       <div className="uz-orb" aria-hidden="true" />
                     </div>
 
-                    <div className="mt-2 text-[11px] text-white/60">USDC (devnet)</div>
+                    <div className="mt-2 text-[11px] text-white/60">
+                      USDC (devnet)
+                    </div>
                   </div>
 
                   <div className="px-4 py-4">
@@ -1157,17 +1283,24 @@ function HomeInner() {
                           {solPrecise}{" "}
                           <span className="text-white/70 font-semibold">SOL</span>
                         </p>
-                        <p className="mt-1 text-sm text-white/60">Used for network fees</p>
+                        <p className="mt-1 text-sm text-white/60">
+                          Used for network fees
+                        </p>
                       </div>
 
-                      <span className="text-xs px-3 py-1 rounded-full uz-chip">Devnet</span>
+                      <span className="text-xs px-3 py-1 rounded-full uz-chip">
+                        Devnet
+                      </span>
                     </div>
                   </div>
                 </div>
 
                 <ReceiveQr className="mt-1" />
 
-                <button onClick={() => disconnect()} className="uz-danger-btn w-full mt-1 py-2">
+                <button
+                  onClick={() => disconnect()}
+                  className="uz-danger-btn w-full mt-1 py-2"
+                >
                   Disconnect Wallet
                 </button>
               </div>
@@ -1185,17 +1318,23 @@ function HomeInner() {
                 <div className="mb-5 rounded-2xl uz-subpanel p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold text-white">Request Payment Link</div>
+                      <div className="text-sm font-semibold text-white">
+                        Request Payment Link
+                      </div>
                       <div className="mt-1 text-xs text-white/70">
                         Share a link that opens UTILIZAP pre-filled to pay you
                       </div>
                     </div>
-                    <span className="text-[11px] px-2 py-1 rounded-full uz-chip">Shareable</span>
+                    <span className="text-[11px] px-2 py-1 rounded-full uz-chip">
+                      Shareable
+                    </span>
                   </div>
 
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="sm:col-span-1">
-                      <label className="text-xs text-white/70">Amount (optional)</label>
+                      <label className="text-xs text-white/70">
+                        Amount (optional)
+                      </label>
                       <input
                         value={requestAmount}
                         onChange={(e) => setRequestAmount(e.target.value)}
@@ -1208,7 +1347,9 @@ function HomeInner() {
 
                     {/* ✅ NEW: request note */}
                     <div className="sm:col-span-2">
-                      <label className="text-xs text-white/70">Note (optional)</label>
+                      <label className="text-xs text-white/70">
+                        Note (optional)
+                      </label>
                       <input
                         value={requestNote}
                         onChange={(e) => setRequestNote(e.target.value)}
@@ -1244,7 +1385,9 @@ function HomeInner() {
 
                       <div className="mt-2 text-[11px] text-white/60">
                         Opens:{" "}
-                        <span className="text-white/80">Recipient + Amount + Note</span>{" "}
+                        <span className="text-white/80">
+                          Recipient + Amount + Note
+                        </span>{" "}
                         auto-filled
                       </div>
 
@@ -1257,7 +1400,9 @@ function HomeInner() {
                         >
                           {showRequestQr ? "Hide QR" : "Show QR"}
                         </button>
-                        <span className="text-[11px] text-white/70">Scan to open payment request</span>
+                        <span className="text-[11px] text-white/70">
+                          Scan to open payment request
+                        </span>
                       </div>
 
                       {showRequestQr && requestQr && (
@@ -1286,7 +1431,7 @@ function HomeInner() {
                   />
                 ) : null}
 
-                <div className="mt-2 mb-4 flex items-center gap-3">
+                <div className="mt-2 mb-3 flex items-center gap-3">
                   <input
                     value={recipient}
                     onChange={(e) => setRecipient(e.target.value)}
@@ -1323,98 +1468,114 @@ function HomeInner() {
                   )}
                 </div>
 
-                {selectedContact ? (
-                  <div className="mt-1 mb-3 text-xs text-white/70">
-                    Selected contact:{" "}
-                    <span className="text-white font-semibold">{selectedContact.name}</span>
-                  </div>
-                ) : (
-                  <div className="mb-3" />
-                )}
-
-                {/* CONTACTS */}
-                <div className="mb-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-white/70">Contacts</p>
-                    <p className="text-[11px] text-white/60">Saved on this device</p>
-                  </div>
-
-                  <div className="mt-2 flex flex-col sm:flex-row gap-3">
-                    <input
-                      value={contactName}
-                      onChange={(e) => setContactName(e.target.value)}
-                      placeholder="Name (e.g., Mike)"
-                      className="uz-input w-full sm:flex-1"
-                      disabled={isBusy}
-                    />
+                {/* Cash App / Venmo style: show ONLY a few "Recents" chips + a Contacts button */}
+                <div className="mb-4 rounded-2xl uz-subpanel p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-white">
+                        Contacts
+                      </div>
+                      <div className="mt-0.5 text-xs text-white/70">
+                        Pick from unlimited saved contacts (Cash App style)
+                      </div>
+                    </div>
 
                     <button
                       type="button"
-                      onClick={addContactFromRecipient}
-                      disabled={
-                        isBusy || !contactName.trim() || !isValidSolanaAddress(recipient.trim())
-                      }
+                      onClick={() => setContactsOpen(true)}
+                      disabled={isBusy}
                       className="uz-btn-secondary"
+                      title="Open contacts"
                     >
-                      Save Contact
+                      📇 Contacts
                     </button>
                   </div>
 
-                  {contacts.length > 0 ? (
-                    <div className="mt-3 rounded-xl overflow-hidden uz-subpanel">
-                      {contacts.map((c) => {
-                        const isSelected =
-                          recipient.trim().toLowerCase() === c.address.toLowerCase();
+                  {selectedContact ? (
+                    <div className="mt-3 text-xs text-white/70">
+                      Selected:{" "}
+                      <span className="text-white font-semibold">
+                        {selectedContact.name}
+                      </span>
+                      <span className="mx-2 text-white/40">•</span>
+                      <span className="font-mono text-white/80">
+                        {shortMid(selectedContact.address, 8, 8)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-xs text-white/60">
+                      Tip: Save your frequent payees and choose them in one tap.
+                    </div>
+                  )}
 
+                  {/* Recents chips (max 3) */}
+                  {recentContactChips.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {recentContactChips.map((c) => {
+                        const active =
+                          recipient.trim().toLowerCase() ===
+                          c.address.toLowerCase();
                         return (
-                          <div
+                          <button
                             key={c.id}
+                            type="button"
+                            onClick={() => chooseContact(c)}
+                            disabled={isBusy}
                             className={[
-                              "flex items-center justify-between gap-3 px-3 py-3 border-b border-white/10 last:border-b-0",
-                              isSelected ? "bg-white/10" : "hover:bg-white/[0.06]",
+                              "rounded-full px-3 py-2 text-xs border transition",
+                              active
+                                ? "bg-white text-black border-white/10"
+                                : "bg-white/5 border-white/10 hover:bg-white/10 text-white",
                             ].join(" ")}
+                            title={c.address}
                           >
-                            <button
-                              type="button"
-                              onClick={() => chooseContact(c.address)}
-                              disabled={isBusy}
-                              className="text-left flex-1 min-w-0"
-                              title="Use this contact"
-                            >
-                              <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                                <span className="text-sm font-semibold text-white truncate">
-                                  {c.name}
-                                </span>
-                                {isSelected ? (
-                                  <span className="text-[11px] px-2 py-0.5 rounded-full border border-white/10 bg-white/10 text-white/90">
-                                    Selected
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="mt-1 text-[11px] text-white/70 font-mono truncate">
-                                {c.address}
-                              </div>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => deleteContact(c.id)}
-                              disabled={isBusy}
-                              className="uz-btn-danger-soft"
-                              title="Delete contact"
-                            >
-                              Delete
-                            </button>
-                          </div>
+                            <span className="font-semibold">{c.name}</span>
+                          </button>
                         );
                       })}
                     </div>
                   ) : (
-                    <div className="mt-3 rounded-xl px-3 py-3 text-xs text-white/70 uz-subpanel">
-                      No contacts yet. Enter a name and use a valid recipient address, then hit{" "}
-                      <span className="text-white font-semibold">Save Contact</span>.
+                    <div className="mt-3 text-xs text-white/70">
+                      No contacts yet — add one below.
                     </div>
                   )}
+
+                  {/* Quick add (still on main screen like Venmo) */}
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-white/70">Quick add</p>
+                      <p className="text-[11px] text-white/60">
+                        Saved on this device
+                      </p>
+                    </div>
+
+                    <div className="mt-2 flex flex-col sm:flex-row gap-3">
+                      <input
+                        value={contactName}
+                        onChange={(e) => setContactName(e.target.value)}
+                        placeholder="Name (e.g., Mike)"
+                        className="uz-input w-full sm:flex-1"
+                        disabled={isBusy}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={addContactFromRecipient}
+                        disabled={
+                          isBusy ||
+                          !contactName.trim() ||
+                          !isValidSolanaAddress(recipient.trim())
+                        }
+                        className="uz-btn-secondary"
+                      >
+                        Save Contact
+                      </button>
+                    </div>
+
+                    <div className="mt-2 text-[11px] text-white/60">
+                      Save the currently entered recipient address as a contact.
+                    </div>
+                  </div>
                 </div>
 
                 <label className="text-xs text-white/70">Amount</label>
@@ -1427,7 +1588,9 @@ function HomeInner() {
                   disabled={isBusy}
                 />
 
-                <label className="mt-4 block text-xs text-white/70">Note (optional)</label>
+                <label className="mt-4 block text-xs text-white/70">
+                  Note (optional)
+                </label>
                 <input
                   value={txNote}
                   onChange={(e) => setTxNote(e.target.value)}
@@ -1454,11 +1617,15 @@ function HomeInner() {
                 </button>
 
                 {txStage === "signing" && (
-                  <div className="mt-2 text-xs text-white/70">Approve in Phantom…</div>
+                  <div className="mt-2 text-xs text-white/70">
+                    Approve in Phantom…
+                  </div>
                 )}
 
                 {txStage === "confirming" && (
-                  <div className="mt-2 text-xs text-white/70">Confirming on Solana…</div>
+                  <div className="mt-2 text-xs text-white/70">
+                    Confirming on Solana…
+                  </div>
                 )}
 
                 {/* RECEIPT HISTORY */}
@@ -1466,7 +1633,9 @@ function HomeInner() {
                   <div className="px-4 py-3 border-b border-white/10">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-sm font-semibold text-white">Receipt History</div>
+                        <div className="text-sm font-semibold text-white">
+                          Receipt History
+                        </div>
                         <div className="mt-0.5 text-xs text-white/70">
                           Last 10 (filtered) • Local + Helius imported
                         </div>
@@ -1481,7 +1650,10 @@ function HomeInner() {
                               try {
                                 await syncHeliusUsdcReceipts(publicKey.toBase58());
                               } catch (e) {
-                                console.error("Helius sync failed (manual refresh):", e);
+                                console.error(
+                                  "Helius sync failed (manual refresh):",
+                                  e
+                                );
                               }
                             }
                             refreshReceiptsFromStorage();
@@ -1517,7 +1689,11 @@ function HomeInner() {
                               : "bg-white/5 border-white/10 hover:bg-white/10 text-white",
                           ].join(" ")}
                         >
-                          {t === "all" ? "All" : t === "sent" ? "Sent" : "Received"}
+                          {t === "all"
+                            ? "All"
+                            : t === "sent"
+                            ? "Sent"
+                            : "Received"}
                         </button>
                       ))}
                     </div>
@@ -1537,7 +1713,9 @@ function HomeInner() {
                         <label className="text-xs text-white/70">Filter</label>
                         <select
                           value={receiptFilter}
-                          onChange={(e) => setReceiptFilter(e.target.value as any)}
+                          onChange={(e) =>
+                            setReceiptFilter(e.target.value as any)
+                          }
                           className="uz-input w-full mt-2"
                         >
                           <option value="all">All</option>
@@ -1576,12 +1754,16 @@ function HomeInner() {
                                       directionBadgeClasses(r.direction),
                                     ].join(" ")}
                                   >
-                                    {r.direction === "received" ? "Received" : "Sent"}
+                                    {r.direction === "received"
+                                      ? "Received"
+                                      : "Sent"}
                                   </span>
 
                                   <div className="text-sm font-semibold text-white truncate uz-receipt__amount">
                                     {amountPretty}{" "}
-                                    <span className="text-white/70 font-semibold">USDC</span>
+                                    <span className="text-white/70 font-semibold">
+                                      USDC
+                                    </span>
                                   </div>
                                 </div>
 
@@ -1589,12 +1771,16 @@ function HomeInner() {
                                   {r.direction === "received" ? (
                                     <>
                                       From:{" "}
-                                      <span className="font-mono text-white">{fromShort}</span>
+                                      <span className="font-mono text-white">
+                                        {fromShort}
+                                      </span>
                                     </>
                                   ) : (
                                     <>
                                       To:{" "}
-                                      <span className="font-mono text-white">{toShort}</span>
+                                      <span className="font-mono text-white">
+                                        {toShort}
+                                      </span>
                                     </>
                                   )}
                                   <span className="mx-2 text-white/40">•</span>
@@ -1604,7 +1790,9 @@ function HomeInner() {
                                 {r.note ? (
                                   <div className="mt-1 text-[11px] text-white/80">
                                     Note:{" "}
-                                    <span className="text-white font-semibold">{r.note}</span>
+                                    <span className="text-white font-semibold">
+                                      {r.note}
+                                    </span>
                                   </div>
                                 ) : null}
 
@@ -1639,7 +1827,10 @@ function HomeInner() {
                                     const ok = await copyText(r.sig);
                                     if (ok) {
                                       setSigCopied(true);
-                                      window.setTimeout(() => setSigCopied(false), 1200);
+                                      window.setTimeout(
+                                        () => setSigCopied(false),
+                                        1200
+                                      );
                                     }
                                   }}
                                   className="uz-btn-secondary disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1702,7 +1893,9 @@ function HomeInner() {
               )}
             </div>
 
-            <div className="mt-4 text-xs text-white/70">Utility first. Build first. Launch second.</div>
+            <div className="mt-4 text-xs text-white/70">
+              Utility first. Build first. Launch second.
+            </div>
           </section>
         )}
 
@@ -1710,6 +1903,128 @@ function HomeInner() {
           UTILIZAP • Non-custodial payments • Devnet environment
         </footer>
       </div>
+
+      {/* ✅ CONTACTS PICKER MODAL (Cash App / Venmo style) */}
+      {contactsOpen && (
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="absolute inset-0 uz-preview__backdrop"
+            onClick={() => {
+              setContactsOpen(false);
+              setContactSearchQuery("");
+            }}
+            aria-label="Close contacts"
+          />
+
+          <div className="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-6">
+            <div className="w-full sm:max-w-md">
+              <div className="uz-preview__ring">
+                <div className="uz-preview__surface rounded-t-3xl sm:rounded-2xl overflow-hidden">
+                  <div className="uz-preview__header px-5 py-4 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white">
+                        Contacts
+                      </div>
+                      <div className="mt-0.5 text-xs text-white/70">
+                        Search • Tap to select • Unlimited
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContactsOpen(false);
+                        setContactSearchQuery("");
+                      }}
+                      className="uz-preview__secondary rounded-lg px-3 py-2 text-xs"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="px-5 pb-5">
+                    <div className="mt-3">
+                      <label className="text-xs text-white/70">Search</label>
+                      <input
+                        value={contactSearchQuery}
+                        onChange={(e) => setContactSearchQuery(e.target.value)}
+                        placeholder="Name or address…"
+                        className="uz-input w-full mt-2"
+                        autoFocus
+                      />
+                    </div>
+
+                    {contactsFiltered.length > 0 ? (
+                      <div className="mt-4 rounded-2xl overflow-hidden uz-subpanel">
+                        <div className="max-h-[420px] overflow-auto">
+                          {contactsFiltered.map((c) => {
+                            const isSelected =
+                              recipient.trim().toLowerCase() ===
+                              c.address.toLowerCase();
+
+                            return (
+                              <div
+                                key={c.id}
+                                className={[
+                                  "flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10 last:border-b-0",
+                                  isSelected
+                                    ? "bg-white/10"
+                                    : "hover:bg-white/[0.06]",
+                                ].join(" ")}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => chooseContact(c)}
+                                  disabled={isBusy}
+                                  className="text-left flex-1 min-w-0"
+                                  title="Use this contact"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                                    <span className="text-sm font-semibold text-white truncate">
+                                      {c.name}
+                                    </span>
+                                    {isSelected ? (
+                                      <span className="text-[11px] px-2 py-0.5 rounded-full border border-white/10 bg-white/10 text-white/90">
+                                        Selected
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-1 text-[11px] text-white/70 font-mono truncate">
+                                    {c.address}
+                                  </div>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => deleteContact(c.id)}
+                                  disabled={isBusy}
+                                  className="uz-btn-danger-soft"
+                                  title="Delete contact"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-2xl px-4 py-4 text-sm text-white/70 uz-subpanel">
+                        No contacts match that search.
+                      </div>
+                    )}
+
+                    <div className="sm:hidden pt-4">
+                      <div className="mx-auto h-1.5 w-12 rounded-full bg-white/15" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ✅ RECEIPT MODAL (FINAL TRANSACTION RECEIPT + NOTE EDIT) */}
       {showReceipt && activeReceipt && (
@@ -1728,8 +2043,15 @@ function HomeInner() {
                   <div className="uz-preview__header px-5 py-4 flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <div className="text-sm font-semibold text-white">{modalTitle}</div>
-                        <span className={["text-[11px] px-2 py-0.5 rounded-full border", modalAccent].join(" ")}>
+                        <div className="text-sm font-semibold text-white">
+                          {modalTitle}
+                        </div>
+                        <span
+                          className={[
+                            "text-[11px] px-2 py-0.5 rounded-full border",
+                            modalAccent,
+                          ].join(" ")}
+                        >
                           {activeReceipt.status === "confirmed"
                             ? "Confirmed"
                             : activeReceipt.status === "failed"
@@ -1774,7 +2096,9 @@ function HomeInner() {
                           To
                         </div>
                         <div className="mt-1 text-sm text-white font-mono break-all">
-                          {activeReceipt.to ? shortMid(activeReceipt.to, 10, 10) : "—"}
+                          {activeReceipt.to
+                            ? shortMid(activeReceipt.to, 10, 10)
+                            : "—"}
                         </div>
                       </div>
 
@@ -1783,7 +2107,9 @@ function HomeInner() {
                           From
                         </div>
                         <div className="mt-1 text-sm text-white font-mono break-all">
-                          {activeReceipt.from ? shortMid(activeReceipt.from, 10, 10) : "—"}
+                          {activeReceipt.from
+                            ? shortMid(activeReceipt.from, 10, 10)
+                            : "—"}
                         </div>
                       </div>
 
@@ -1792,7 +2118,9 @@ function HomeInner() {
                           Tx Signature
                         </div>
                         <div className="mt-1 text-sm text-white font-mono break-all">
-                          {activeReceipt.sig ? shortMid(activeReceipt.sig, 14, 14) : "Pending…"}
+                          {activeReceipt.sig
+                            ? shortMid(activeReceipt.sig, 14, 14)
+                            : "Pending…"}
                         </div>
                       </div>
                     </div>
@@ -1804,7 +2132,9 @@ function HomeInner() {
                           Note
                         </div>
                         {noteSavedTick ? (
-                          <span className="text-[11px] text-emerald-200">Saved ✓</span>
+                          <span className="text-[11px] text-emerald-200">
+                            Saved ✓
+                          </span>
                         ) : null}
                       </div>
 
@@ -1873,7 +2203,9 @@ function HomeInner() {
                         rel="noreferrer"
                         className={[
                           "uz-preview__primary rounded-xl px-4 py-3 text-sm font-semibold text-center",
-                          activeReceipt.explorerUrl ? "" : "pointer-events-none opacity-40",
+                          activeReceipt.explorerUrl
+                            ? ""
+                            : "pointer-events-none opacity-40",
                         ].join(" ")}
                       >
                         Explorer →
@@ -1940,7 +2272,9 @@ function HomeInner() {
                 <div className="uz-preview__surface rounded-t-3xl sm:rounded-2xl overflow-hidden">
                   <div className="uz-preview__header px-5 py-4 flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-white">Preview Transaction</div>
+                      <div className="text-sm font-semibold text-white">
+                        Preview Transaction
+                      </div>
                       <div className="mt-0.5 text-xs text-white/70">
                         Confirm details before Phantom opens
                       </div>
@@ -1962,7 +2296,9 @@ function HomeInner() {
                       </div>
                       <div className="mt-2 text-4xl font-extrabold tracking-tight text-white uz-preview__amount">
                         {previewAmountPretty}
-                        <span className="text-white/70 text-base font-semibold ml-2">USDC</span>
+                        <span className="text-white/70 text-base font-semibold ml-2">
+                          USDC
+                        </span>
                       </div>
                     </div>
 
@@ -2019,7 +2355,9 @@ function HomeInner() {
                         <div className="text-[11px] uppercase tracking-wider text-white/70">
                           Note
                         </div>
-                        <div className="mt-1 text-sm text-white/80">{txNote.trim()}</div>
+                        <div className="mt-1 text-sm text-white/80">
+                          {txNote.trim()}
+                        </div>
                       </div>
                     ) : null}
 
@@ -2032,8 +2370,8 @@ function HomeInner() {
                           className="mt-0.5"
                         />
                         <span className="text-xs text-white/80">
-                          I confirm the recipient and amount are correct. I understand blockchain
-                          transactions are typically irreversible.
+                          I confirm the recipient and amount are correct. I understand
+                          blockchain transactions are typically irreversible.
                         </span>
                       </label>
                     </div>
@@ -2075,12 +2413,22 @@ function HomeInner() {
       {/* Complete ✓ pop animation */}
       <style jsx>{`
         @keyframes uzCompletePop {
-          0% { transform: scale(1); }
-          45% { transform: scale(1.06); }
-          70% { transform: scale(0.98); }
-          100% { transform: scale(1); }
+          0% {
+            transform: scale(1);
+          }
+          45% {
+            transform: scale(1.06);
+          }
+          70% {
+            transform: scale(0.98);
+          }
+          100% {
+            transform: scale(1);
+          }
         }
-        .uz-complete-pop { animation: uzCompletePop 420ms ease-out; }
+        .uz-complete-pop {
+          animation: uzCompletePop 420ms ease-out;
+        }
       `}</style>
     </main>
   );
