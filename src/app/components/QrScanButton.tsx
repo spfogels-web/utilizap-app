@@ -4,26 +4,24 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   onScan: (value: string) => void;
-
-  /**
-   * Optional: keep your existing validate hook, but we will run it on the
-   * normalized *recipient address* (not the raw QR string).
-   */
   validate?: (value: string) => boolean;
-
   disabled?: boolean;
-
-  /** "button" renders the scan button, "panel" renders the scanner panel (when open) */
   mode?: "button" | "panel";
 };
 
 const CHANNEL = "uz:qr:toggle";
-const AMOUNT_CHANNEL = "uz:qr:amount"; // listen elsewhere to auto-fill amount
-const NOTE_CHANNEL = "uz:qr:note"; // ✅ NEW: listen elsewhere to auto-fill note
+const RECIPIENT_CHANNEL = "uz:qr:recipient";
+const AMOUNT_CHANNEL = "uz:qr:amount";
+const NOTE_CHANNEL = "uz:qr:note";
 
 function emitToggle(open: boolean) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(CHANNEL, { detail: { open } }));
+}
+
+function emitRecipient(recipient: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(RECIPIENT_CHANNEL, { detail: { recipient } }));
 }
 
 function emitAmount(amount: string) {
@@ -36,137 +34,123 @@ function emitNote(note: string) {
   window.dispatchEvent(new CustomEvent(NOTE_CHANNEL, { detail: { note } }));
 }
 
-/**
- * Practical Solana base58 address check (no external deps).
- * Pubkeys are 32 bytes => base58 strings typically 32–44 chars.
- */
+/** Basic Solana base58 address check (no network calls) */
 function isLikelySolanaAddress(v: string) {
   const s = (v || "").trim();
-  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s);
+  if (s.length < 32 || s.length > 44) return false;
+  return /^[1-9A-HJ-NP-Za-km-z]+$/.test(s);
 }
 
-function sanitizeAmount(raw?: string | null) {
-  const s = String(raw ?? "").trim();
-  if (!s) return undefined;
-  const n = Number(s);
-  if (!Number.isFinite(n) || n <= 0) return undefined;
+function cleanNumberString(v: string) {
+  // allow: "25", "25.5" (strip commas/spaces)
+  const s = (v || "").trim().replace(/,/g, "");
+  if (!s) return "";
+  if (!/^\d+(\.\d+)?$/.test(s)) return "";
   return s;
 }
 
-function sanitizeNote(raw?: string | null) {
-  const s = String(raw ?? "").trim();
-  if (!s) return undefined;
-  return s.slice(0, 140);
+function pickFirst(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const s = (v || "").trim();
+    if (s) return s;
+  }
+  return "";
 }
 
-/**
- * Extract recipient (+ optional amount + optional note) from scanned QR.
- * Supports:
- *  1) Plain address: "AKFwMNNV..."
- *  2) UTILIZAP request links:
- *       - https://app.utilizap.io/?to=<address>&amount=25&note=Lunch
- *       - https://app.utilizap.io/request?to=<address>&amount=25&note=Lunch
- *     (also supports aliases: recipient/address, amt)
- *  3) Solana Pay URI (optional support):
- *       - solana:<address>?amount=25&label=...&message=...&memo=...
- */
-function parseScannedValue(raw: string): {
-  ok: boolean;
+type Parsed = {
+  kind: "solana" | "utilizap" | "unknown";
   recipient?: string;
   amount?: string;
   note?: string;
-  reason?: string;
-} {
+};
+
+/**
+ * Accept:
+ *  - plain Solana address
+ *  - UTILIZAP request URL / deep link containing ?to=...
+ *  - solana:<address>?amount=...&memo=... (Solana Pay-ish)
+ */
+function parseQrValue(raw: string): Parsed {
   const value = (raw || "").trim();
-  if (!value) return { ok: false, reason: "Empty QR value." };
+  if (!value) return { kind: "unknown" };
 
-  // 1) Plain address
-  if (isLikelySolanaAddress(value)) {
-    return { ok: true, recipient: value };
-  }
+  // 1) Plain Solana address
+  if (isLikelySolanaAddress(value)) return { kind: "solana", recipient: value };
 
-  // 2) Solana Pay URI (optional)
-  if (value.toLowerCase().startsWith("solana:")) {
-    const after = value.slice("solana:".length);
+  // 2) solana:<address>[?params]
+  if (/^solana:/i.test(value)) {
+    const after = value.replace(/^solana:/i, "").trim();
+
+    // split address and query
     const [addrPart, queryPart] = after.split("?");
-    const addr = (addrPart || "").trim();
+    const recipient = (addrPart || "").trim();
 
-    if (isLikelySolanaAddress(addr)) {
-      let amount: string | undefined;
-      let note: string | undefined;
+    if (recipient && isLikelySolanaAddress(recipient)) {
+      let amount = "";
+      let note = "";
 
       if (queryPart) {
-        const params = new URLSearchParams(queryPart);
+        const sp = new URLSearchParams(queryPart);
+        amount = cleanNumberString(
+          pickFirst(sp.get("amount"), sp.get("a"), sp.get("amt"))
+        );
 
-        amount = sanitizeAmount(params.get("amount"));
-
-        // Solana Pay commonly uses message/memo as a human note
-        note =
-          sanitizeNote(params.get("note")) ??
-          sanitizeNote(params.get("message")) ??
-          sanitizeNote(params.get("memo"));
+        // common fields: memo/message/note
+        note = pickFirst(sp.get("note"), sp.get("memo"), sp.get("message"));
       }
 
-      return { ok: true, recipient: addr, amount, note };
+      return { kind: "solana", recipient, amount: amount || undefined, note: note || undefined };
     }
   }
 
-  // 3) UTILIZAP request link (URL)
+  // 3) URL / deep link with ?to=...
+  // Handles:
+  //  - http://localhost:3000/?to=...&amount=...&note=...
+  //  - https://utilizap.xyz/?to=...
+  //  - utilizap://request?to=...
+  //  - any deep link that has "to" param
   try {
-    const url = new URL(value);
+    const normalized =
+      /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value) || value.startsWith("utilizap://")
+        ? value
+        : `https://${value}`;
 
-    // Accept your domain; allow staging/subdomains if you ever use them
-    const host = (url.host || "").toLowerCase();
-    const isUtilizap =
-      host === "app.utilizap.io" ||
-      host === "utilizap.io" ||
-      host.endsWith(".utilizap.io");
+    const u = new URL(normalized);
 
-    if (!isUtilizap) {
-      return { ok: false, reason: "Not a UTILIZAP link or Solana address." };
-    }
+    const to = (u.searchParams.get("to") || "").trim();
+    const recipient = to && isLikelySolanaAddress(to) ? to : "";
 
-    const recipient =
-      (url.searchParams.get("to") ||
-        url.searchParams.get("recipient") ||
-        url.searchParams.get("address") ||
-        "")!.trim();
-
-    const amount = sanitizeAmount(
-      url.searchParams.get("amount") || url.searchParams.get("amt")
+    // Allow these param names (in case you change later):
+    const amount = cleanNumberString(
+      pickFirst(u.searchParams.get("amount"), u.searchParams.get("amt"), u.searchParams.get("a"))
     );
 
-    const note = sanitizeNote(url.searchParams.get("note"));
+    const note = pickFirst(
+      u.searchParams.get("note"),
+      u.searchParams.get("memo"),
+      u.searchParams.get("message")
+    );
 
-    if (!recipient || !isLikelySolanaAddress(recipient)) {
+    if (recipient) {
       return {
-        ok: false,
-        reason: "UTILIZAP link missing a valid ?to= address.",
+        kind: "utilizap",
+        recipient,
+        amount: amount || undefined,
+        note: note || undefined,
       };
     }
-
-    return {
-      ok: true,
-      recipient,
-      amount,
-      note,
-    };
   } catch {
-    // not a URL
+    // ignore
   }
 
-  return {
-    ok: false,
-    reason: "QR not recognized. Use a Solana address or UTILIZAP request QR.",
-  };
+  // 4) If someone encoded "solana:<addr>" without query parsing above, fallback:
+  const maybe = value.replace(/^solana:/i, "").trim();
+  if (isLikelySolanaAddress(maybe)) return { kind: "solana", recipient: maybe };
+
+  return { kind: "unknown" };
 }
 
-export default function QrScanButton({
-  onScan,
-  validate,
-  disabled,
-  mode = "button",
-}: Props) {
+export default function QrScanButton({ onScan, validate, disabled, mode = "button" }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scannerRef = useRef<any>(null);
 
@@ -203,7 +187,6 @@ export default function QrScanButton({
   };
 
   useEffect(() => {
-    // Only the panel instance should start camera/scanner
     if (mode !== "panel") return;
     if (!open) return;
 
@@ -222,36 +205,32 @@ export default function QrScanButton({
           videoEl,
           async (result: any) => {
             const raw = typeof result === "string" ? result : result?.data;
-            const scanned = (raw || "").trim();
-            if (!scanned) return;
+            const value = (raw || "").trim();
+            if (!value) return;
 
-            const parsed = parseScannedValue(scanned);
-            if (!parsed.ok || !parsed.recipient) {
-              setErr(parsed.reason || "Invalid QR.");
+            const parsed = parseQrValue(value);
+            const recipientForValidate = parsed.recipient || value;
+
+            if (validate && !validate(recipientForValidate)) {
+              setErr("That QR doesn’t look like a valid Solana address or UTILIZAP request.");
               return;
             }
 
-            // Validate the recipient address (not the raw link)
-            if (validate && !validate(parsed.recipient)) {
-              setErr("That QR doesn’t contain a valid Solana address.");
+            if (!validate && parsed.kind === "unknown") {
+              setErr("That QR doesn’t look like a valid Solana address or UTILIZAP request.");
               return;
             }
+
+            // ✅ NEW: emit autofill payloads (recipient / amount / note)
+            if (parsed.recipient) emitRecipient(parsed.recipient);
+            if (parsed.amount) emitAmount(parsed.amount);
+            if (parsed.note) emitNote(parsed.note);
 
             await stopScanner();
             emitToggle(false);
 
-            // ✅ Set recipient
-            onScan(parsed.recipient);
-
-            // ✅ Auto-fill amount (if present)
-            if (parsed.amount) {
-              emitAmount(parsed.amount);
-            }
-
-            // ✅ Auto-fill note (if present)
-            if (parsed.note) {
-              emitNote(parsed.note);
-            }
+            // keep existing behavior: pass the raw QR string up
+            onScan(value);
           },
           {
             preferredCamera: "environment",
@@ -264,9 +243,7 @@ export default function QrScanButton({
         scannerRef.current = scanner;
         await scanner.start();
 
-        if (!alive) {
-          await stopScanner();
-        }
+        if (!alive) await stopScanner();
       } catch (e: any) {
         setErr(e?.message || "Camera could not start. Check permissions.");
       }
@@ -283,7 +260,7 @@ export default function QrScanButton({
 
   if (!canUse) return null;
 
-  // ✅ BUTTON MODE — compact, single-line fit
+  // ✅ BUTTON MODE
   if (mode === "button") {
     return (
       <button
@@ -310,63 +287,86 @@ export default function QrScanButton({
     );
   }
 
-  // ✅ PANEL MODE (only renders when open)
+  // ✅ PANEL MODE
   if (!open) return null;
 
   return (
-    <div className="mt-3 mb-4 w-full flex justify-center">
-      <div className="relative w-full max-w-[440px] aspect-square rounded-2xl border border-white/10 bg-black/60 overflow-hidden">
-        {/* Header */}
-        <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between">
-          <div className="text-xs text-white/80">Scan QR</div>
+    <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm">
+      {/* Top bar */}
+      <div
+        className="absolute left-0 right-0 top-0 z-30"
+        style={{
+          paddingTop: "env(safe-area-inset-top)",
+          paddingLeft: "env(safe-area-inset-left)",
+          paddingRight: "env(safe-area-inset-right)",
+        }}
+      >
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="text-xs text-white/85">Scan Solana address or UTILIZAP request</div>
+
           <button
             type="button"
             onClick={async () => {
               await stopScanner();
               emitToggle(false);
             }}
-            className="h-8 w-8 rounded-full border border-white/10 bg-black/50 text-white/80 hover:text-white"
+            className="h-10 w-10 rounded-full border border-white/10 bg-black/40 text-white/85 hover:text-white"
             aria-label="Close scanner"
             title="Close"
           >
             ✕
           </button>
         </div>
+      </div>
 
-        {/* Video */}
-        <video
-          ref={videoRef}
-          className="absolute inset-0 h-full w-full object-cover"
-          muted
-          playsInline
-        />
-
-        {/* Subtle frame overlay */}
+      {/* Centered square scanner */}
+      <div className="absolute inset-0 flex items-center justify-center px-4">
         <div
-          className="absolute inset-0"
-          aria-hidden="true"
-          style={{
-            boxShadow: "inset 0 0 0 2px rgba(255,255,255,.06)",
-          }}
-        />
-        <div
-          className="absolute inset-0 pointer-events-none"
-          aria-hidden="true"
-          style={{
-            background:
-              "radial-gradient(closest-side, transparent 62%, rgba(0,0,0,.35) 100%)",
-          }}
-        />
+          className="
+            relative
+            w-full
+            max-w-[520px]
+            aspect-square
+            rounded-2xl
+            overflow-hidden
+            border
+            border-white/10
+            bg-black
+          "
+        >
+          {/* Video fills the square */}
+          <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" muted playsInline />
 
-        {/* Error + tip */}
-        {err && (
-          <div className="absolute left-3 right-3 bottom-10 z-10 text-[11px] text-red-300">
-            {err}
+          {/* Frame + vignette */}
+          <div
+            className="absolute inset-0 pointer-events-none"
+            aria-hidden="true"
+            style={{ boxShadow: "inset 0 0 0 2px rgba(255,255,255,.06)" }}
+          />
+          <div
+            className="absolute inset-0 pointer-events-none"
+            aria-hidden="true"
+            style={{
+              background: "radial-gradient(closest-side, transparent 62%, rgba(0,0,0,.45) 100%)",
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Bottom tip + error */}
+      <div
+        className="absolute left-0 right-0 bottom-0 z-30"
+        style={{
+          paddingBottom: "env(safe-area-inset-bottom)",
+          paddingLeft: "env(safe-area-inset-left)",
+          paddingRight: "env(safe-area-inset-right)",
+        }}
+      >
+        <div className="px-4 pb-4">
+          {err && <div className="mb-2 text-[12px] text-red-300">{err}</div>}
+          <div className="text-[12px] text-white/75">
+            Tip: Scan a Solana address or a UTILIZAP request QR to auto-fill recipient, amount, and note.
           </div>
-        )}
-        <div className="absolute left-3 right-3 bottom-3 z-10 text-[11px] text-white/70">
-          Tip: Scan a plain Solana address OR a UTILIZAP request QR
-          (app.utilizap.io with <span className="text-white/90">?to=</span>).
         </div>
       </div>
     </div>

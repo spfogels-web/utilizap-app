@@ -26,8 +26,10 @@ import ReceiveQr from "./components/ReceiveQr";
 const USDC_MINT_DEVNET =
   "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 
-// ✅ QR scanner amount auto-fill channel (emitted by QrScanButton when scanning UTILIZAP request QR)
+// ✅ QR scanner auto-fill channels (emitted by QrScanButton when scanning request QR)
 const UZ_QR_AMOUNT_EVENT = "uz:qr:amount";
+const UZ_QR_NOTE_EVENT = "uz:qr:note";
+const UZ_QR_TO_EVENT = "uz:qr:to";
 
 function shortAddr(address: string) {
   return address.slice(0, 4) + "..." + address.slice(-4);
@@ -342,6 +344,120 @@ function HomeInner() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // --------------------
+  // ✅ QR helpers (Request QR parsing + validation)
+  // --------------------
+  function getBaseOrigin() {
+    return (
+      origin ||
+      (typeof window !== "undefined"
+        ? window.location.origin
+        : "https://example.com")
+    );
+  }
+
+  function safeDecodeMaybe(input: string) {
+    const s = (input ?? "").trim();
+    if (!s) return "";
+    // If it's percent-encoded, try decoding once.
+    if (/%[0-9A-Fa-f]{2}/.test(s)) {
+      try {
+        return decodeURIComponent(s);
+      } catch {
+        return s;
+      }
+    }
+    return s;
+  }
+
+  type ParsedRequest = { to?: string; amount?: string; note?: string };
+
+  function parsePaymentRequest(rawInput: string): ParsedRequest {
+    const raw0 = (rawInput ?? "").trim();
+    if (!raw0) return {};
+
+    const raw = safeDecodeMaybe(raw0);
+
+    // 1) Plain address
+    if (isValidSolanaAddress(raw)) return { to: raw };
+
+    // 2) solana:<address>?amount=...&memo=... (Solana Pay-ish)
+    //    We normalize to "solana://" so URL can parse consistently.
+    if (/^solana:/i.test(raw)) {
+      try {
+        const normalized = raw.replace(/^solana:/i, "solana://");
+        const u = new URL(normalized);
+
+        // host or pathname depending on how it's formed
+        const addr =
+          (u.hostname && u.hostname !== "solana" ? u.hostname : "") ||
+          u.pathname.replace(/^\/+/, "");
+
+        const to = addr?.trim();
+        const amount = (u.searchParams.get("amount") ?? "").trim();
+        const note = (
+          u.searchParams.get("memo") ??
+          u.searchParams.get("note") ??
+          u.searchParams.get("message") ??
+          ""
+        ).trim();
+
+        const out: ParsedRequest = {};
+        if (to && isValidSolanaAddress(to)) out.to = to;
+
+        if (amount) {
+          const n = Number(amount);
+          if (Number.isFinite(n) && n > 0) out.amount = amount;
+        }
+
+        if (note) out.note = note.slice(0, 140);
+
+        return out;
+      } catch {
+        return {};
+      }
+    }
+
+    // 3) Any URL (UTILIZAP request link or similar)
+    try {
+      const u = new URL(raw, getBaseOrigin());
+
+      const to = (u.searchParams.get("to") ?? "").trim();
+      const amount = (u.searchParams.get("amount") ?? "").trim();
+
+      const note = (
+        u.searchParams.get("note") ??
+        u.searchParams.get("memo") ??
+        u.searchParams.get("message") ??
+        ""
+      ).trim();
+
+      const out: ParsedRequest = {};
+
+      if (to && isValidSolanaAddress(to)) out.to = to;
+
+      if (amount) {
+        const n = Number(amount);
+        if (Number.isFinite(n) && n > 0) out.amount = amount;
+      }
+
+      if (note) out.note = note.slice(0, 140);
+
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  function canValidateScanValue(v: string) {
+    const raw = (v ?? "").trim();
+    if (!raw) return false;
+    if (isValidSolanaAddress(raw)) return true;
+
+    const parsed = parsePaymentRequest(raw);
+    return Boolean(parsed.to && isValidSolanaAddress(parsed.to));
+  }
+
   // ✅ Listen for amount emitted by QR scan (UTILIZAP request QR)
   useEffect(() => {
     if (!mounted) return;
@@ -359,6 +475,43 @@ function HomeInner() {
 
     window.addEventListener(UZ_QR_AMOUNT_EVENT, handler as any);
     return () => window.removeEventListener(UZ_QR_AMOUNT_EVENT, handler as any);
+  }, [mounted]);
+
+  // ✅ Listen for note emitted by QR scan (optional support)
+  useEffect(() => {
+    if (!mounted) return;
+
+    const handler = (e: any) => {
+      const raw = e?.detail?.note ?? e?.detail?.memo ?? e?.detail?.message;
+      if (!raw) return;
+
+      const clean = String(raw).trim();
+      if (!clean) return;
+
+      setTxNote(clean.slice(0, 140));
+    };
+
+    window.addEventListener(UZ_QR_NOTE_EVENT, handler as any);
+    return () => window.removeEventListener(UZ_QR_NOTE_EVENT, handler as any);
+  }, [mounted]);
+
+  // ✅ Listen for recipient emitted by QR scan (optional support)
+  useEffect(() => {
+    if (!mounted) return;
+
+    const handler = (e: any) => {
+      const raw = e?.detail?.to ?? e?.detail?.recipient ?? e?.detail?.address;
+      if (!raw) return;
+
+      const clean = String(raw).trim();
+      if (!clean) return;
+      if (!isValidSolanaAddress(clean)) return;
+
+      setRecipient(clean);
+    };
+
+    window.addEventListener(UZ_QR_TO_EVENT, handler as any);
+    return () => window.removeEventListener(UZ_QR_TO_EVENT, handler as any);
   }, [mounted]);
 
   function fmtWhen(ts: number) {
@@ -573,6 +726,32 @@ function HomeInner() {
     if (didAnything) setPrefillDone(true);
   }, [mounted, prefillDone, searchParams]);
 
+  // ✅ UTILIZAP QR scan handler: supports address, encoded URLs, request links, and solana: URIs
+  function handleQrScan(scannedValue: string) {
+    const raw = (scannedValue ?? "").trim();
+    if (!raw) return;
+
+    const parsed = parsePaymentRequest(raw);
+
+    if (parsed.to && isValidSolanaAddress(parsed.to)) {
+      setRecipient(parsed.to);
+    }
+
+    if (parsed.amount) {
+      const n = Number(parsed.amount);
+      if (Number.isFinite(n) && n > 0) setAmount(parsed.amount);
+    }
+
+    if (parsed.note) {
+      setTxNote(parsed.note);
+    }
+
+    // Fallback: if it was just a plain address and nothing else
+    if (!parsed.to && isValidSolanaAddress(raw)) {
+      setRecipient(raw);
+    }
+  }
+
   // Load contacts
   useEffect(() => {
     setContacts(loadContacts());
@@ -637,9 +816,7 @@ function HomeInner() {
   const selectedContact = useMemo(() => {
     const r = recipient.trim().toLowerCase();
     if (!r) return null;
-    return (
-      contacts.find((c) => c.address.trim().toLowerCase() === r) ?? null
-    );
+    return contacts.find((c) => c.address.trim().toLowerCase() === r) ?? null;
   }, [contacts, recipient]);
 
   // Cash App-ish ordering: Recents first, then A-Z
@@ -1094,10 +1271,7 @@ function HomeInner() {
   // ✅ PREVIEW helpers
   // --------------------
   const previewTo = useMemo(() => recipient.trim(), [recipient]);
-  const previewFrom = useMemo(
-    () => publicKey?.toBase58() ?? "",
-    [publicKey]
-  );
+  const previewFrom = useMemo(() => publicKey?.toBase58() ?? "", [publicKey]);
   const previewAmountPretty = useMemo(() => {
     const n = Number(amount);
     if (Number.isFinite(n) && n > 0) return formatUsd(n);
@@ -1425,8 +1599,8 @@ function HomeInner() {
                 {mounted ? (
                   <QrScanButton
                     mode="panel"
-                    validate={(v) => isValidSolanaAddress(v.trim())}
-                    onScan={(value) => setRecipient(value.trim())}
+                    validate={(v) => canValidateScanValue(v)}
+                    onScan={(value) => handleQrScan(value)}
                     disabled={!connected || isBusy}
                   />
                 ) : null}
@@ -1457,8 +1631,8 @@ function HomeInner() {
                   {mounted ? (
                     <QrScanButton
                       mode="button"
-                      validate={(v) => isValidSolanaAddress(v.trim())}
-                      onScan={(value) => setRecipient(value.trim())}
+                      validate={(v) => canValidateScanValue(v)}
+                      onScan={(value) => handleQrScan(value)}
                       disabled={!connected || isBusy}
                     />
                   ) : (
@@ -1523,8 +1697,9 @@ function HomeInner() {
                             disabled={isBusy}
                             className={[
                               "rounded-full px-3 py-2 text-xs border transition",
+                              // ✅ FIX: no more white-on-white
                               active
-                                ? "bg-white text-black border-white/10"
+                                ? "bg-white/10 text-white border-white/15"
                                 : "bg-white/5 border-white/10 hover:bg-white/10 text-white",
                             ].join(" ")}
                             title={c.address}
@@ -1648,7 +1823,9 @@ function HomeInner() {
                             lastHeliusSyncRef.current = "";
                             if (publicKey?.toBase58()) {
                               try {
-                                await syncHeliusUsdcReceipts(publicKey.toBase58());
+                                await syncHeliusUsdcReceipts(
+                                  publicKey.toBase58()
+                                );
                               } catch (e) {
                                 console.error(
                                   "Helius sync failed (manual refresh):",
@@ -1683,9 +1860,10 @@ function HomeInner() {
                           type="button"
                           onClick={() => setReceiptTab(t)}
                           className={[
-                            "rounded-lg px-3 py-2 text-xs border",
+                            "rounded-lg px-3 py-2 text-xs border transition",
+                            // ✅ FIX: no more white-on-white
                             receiptTab === t
-                              ? "bg-white text-black border-white/10"
+                              ? "bg-white/10 text-white border-white/15"
                               : "bg-white/5 border-white/10 hover:bg-white/10 text-white",
                           ].join(" ")}
                         >
@@ -1838,15 +2016,16 @@ function HomeInner() {
                                   {sigCopied ? "Copied ✓" : "Copy Tx"}
                                 </button>
 
+                                {/* ✅ FIX: Explorer stays UTILIZAP-styled (no white) */}
                                 <a
                                   href={r.explorerUrl ?? "#"}
                                   target="_blank"
                                   rel="noreferrer"
                                   className={[
-                                    "rounded-lg px-3 py-2 text-xs text-center border",
+                                    "uz-btn-secondary text-center",
                                     r.explorerUrl
-                                      ? "bg-white text-black border-white/10 hover:opacity-90"
-                                      : "bg-white/10 text-white/40 border-white/10 pointer-events-none",
+                                      ? ""
+                                      : "opacity-40 pointer-events-none",
                                   ].join(" ")}
                                 >
                                   Explorer
@@ -1868,7 +2047,9 @@ function HomeInner() {
           </section>
         ) : (
           <section className="mt-6 uz-panel rounded-2xl p-8 sm:p-10 text-center">
-            <div className="text-xs text-white/70">UTILIZAP • Devnet Preview</div>
+            <div className="text-xs text-white/70">
+              UTILIZAP • Devnet Preview
+            </div>
 
             <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight">
               Venmo-style USDC payments,
@@ -1876,8 +2057,8 @@ function HomeInner() {
             </h1>
 
             <p className="mt-4 max-w-2xl mx-auto text-sm sm:text-base text-white/80">
-              Connect your wallet to access the UTILIZAP dashboard and send USDC with QR
-              and on-chain confirmation.
+              Connect your wallet to access the UTILIZAP dashboard and send USDC
+              with QR and on-chain confirmation.
             </p>
 
             <div className="mt-6 flex justify-center">
@@ -2062,7 +2243,8 @@ function HomeInner() {
                         </span>
                       </div>
                       <div className="mt-0.5 text-xs text-white/70">
-                        {fmtWhen(activeReceipt.createdAt)} • {activeReceipt.cluster}
+                        {fmtWhen(activeReceipt.createdAt)} •{" "}
+                        {activeReceipt.cluster}
                       </div>
                     </div>
 
@@ -2155,7 +2337,10 @@ function HomeInner() {
                             if (!activeReceipt) return;
                             updateReceiptNote(activeReceipt.id, receiptNoteDraft);
                             setNoteSavedTick(true);
-                            window.setTimeout(() => setNoteSavedTick(false), 1400);
+                            window.setTimeout(
+                              () => setNoteSavedTick(false),
+                              1400
+                            );
                           }}
                           className="uz-btn-secondary"
                         >
@@ -2170,7 +2355,10 @@ function HomeInner() {
                             if (!activeReceipt) return;
                             updateReceiptNote(activeReceipt.id, "");
                             setNoteSavedTick(true);
-                            window.setTimeout(() => setNoteSavedTick(false), 1400);
+                            window.setTimeout(
+                              () => setNoteSavedTick(false),
+                              1400
+                            );
                           }}
                           className="uz-btn-secondary"
                         >
@@ -2220,7 +2408,10 @@ function HomeInner() {
                           const ok = await copyText(receiptShareLink);
                           if (ok) {
                             setReceiptCopied(true);
-                            window.setTimeout(() => setReceiptCopied(false), 1200);
+                            window.setTimeout(
+                              () => setReceiptCopied(false),
+                              1200
+                            );
                           }
                         }}
                         disabled={!receiptShareLink}
@@ -2331,7 +2522,9 @@ function HomeInner() {
                         <div className="text-[11px] uppercase tracking-wider text-white/70">
                           Network
                         </div>
-                        <div className="mt-1 text-sm text-white">Solana Devnet</div>
+                        <div className="mt-1 text-sm text-white">
+                          Solana Devnet
+                        </div>
                       </div>
 
                       <div className="px-4 py-3">
@@ -2341,7 +2534,9 @@ function HomeInner() {
                               Estimated Fee
                             </div>
                             <div className="mt-1 text-sm text-white">
-                              {previewFeeLoading ? "Calculating…" : previewFeeText}
+                              {previewFeeLoading
+                                ? "Calculating…"
+                                : previewFeeText}
                             </div>
                           </div>
 
@@ -2370,8 +2565,9 @@ function HomeInner() {
                           className="mt-0.5"
                         />
                         <span className="text-xs text-white/80">
-                          I confirm the recipient and amount are correct. I understand
-                          blockchain transactions are typically irreversible.
+                          I confirm the recipient and amount are correct. I
+                          understand blockchain transactions are typically
+                          irreversible.
                         </span>
                       </label>
                     </div>
