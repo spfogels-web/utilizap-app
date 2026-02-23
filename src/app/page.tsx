@@ -13,20 +13,14 @@ import { useSearchParams } from "next/navigation";
 import QRCode from "qrcode";
 
 import { getSolBalance, getSplTokenBalance } from "./lib/balances";
-import { sendUsdcDevnet, isValidSolanaAddress } from "./lib/transfer";
+import { sendUsdc, isValidSolanaAddress } from "./lib/transfer";
 import { heliusAddressTransactions } from "./lib/helius";
+import { CLUSTER } from "./lib/constants";
 
 import QrScanButton from "./components/QrScanButton";
 import ReceiveQr from "./components/ReceiveQr";
 
-/**
- * ✅ Devnet USDC mint (Helius tokenTransfers uses mint address)
- * This is standard for Solana devnet USDC.
- */
-const USDC_MINT_DEVNET =
-  "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-
-// ✅ QR scanner auto-fill channels (emitted by QrScanButton when scanning request QR)
+// ✅ QR scanner auto-fill channels (optional support)
 const UZ_QR_AMOUNT_EVENT = "uz:qr:amount";
 const UZ_QR_NOTE_EVENT = "uz:qr:note";
 const UZ_QR_TO_EVENT = "uz:qr:to";
@@ -60,7 +54,7 @@ type TxReceipt = {
   sig: string | null;
   createdAt: number;
 
-  cluster: "devnet" | "mainnet-beta";
+  cluster: "mainnet-beta";
   status: TxReceiptStatus;
 
   direction: TxReceiptDirection;
@@ -82,9 +76,7 @@ function ensureReceiptsStore() {
   try {
     const existing = window.localStorage.getItem(RECEIPTS_KEY);
     if (existing === null) window.localStorage.setItem(RECEIPTS_KEY, "[]");
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 function safeParseReceipts(raw: string | null): TxReceipt[] {
@@ -100,7 +92,7 @@ function safeParseReceipts(raw: string | null): TxReceipt[] {
           typeof r.id === "string" &&
           typeof r.createdAt === "number" &&
           (r.sig === null || typeof r.sig === "string") &&
-          (r.cluster === "devnet" || r.cluster === "mainnet-beta") &&
+          r.cluster === "mainnet-beta" &&
           (r.status === "submitted" ||
             r.status === "confirming" ||
             r.status === "confirmed" ||
@@ -120,7 +112,7 @@ function safeParseReceipts(raw: string | null): TxReceipt[] {
           id: r.id,
           sig: r.sig ?? null,
           createdAt: r.createdAt,
-          cluster: r.cluster,
+          cluster: "mainnet-beta" as const,
           status: r.status,
           direction: dir,
           amountUi: String(r.amountUi ?? "").trim(),
@@ -150,9 +142,7 @@ function saveReceipts(next: TxReceipt[]) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(RECEIPTS_KEY, JSON.stringify(next));
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 function upsertReceipt(next: TxReceipt) {
@@ -165,9 +155,7 @@ function upsertReceipt(next: TxReceipt) {
         ? [next, ...prev.filter((r) => r.id !== next.id)]
         : [next, ...prev];
     saveReceipts(merged);
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 // Premium currency formatting (USDC as "cash")
@@ -188,8 +176,6 @@ type Contact = {
 };
 
 const CONTACTS_KEY = "uz_contacts_v1";
-
-// NEW: keep "last used" separately so your existing contacts keep working
 type ContactMetaStore = Record<string, { lastUsedAt: number }>;
 const CONTACTS_META_KEY = "uz_contacts_meta_v1";
 
@@ -253,9 +239,7 @@ function saveContactsMeta(next: ContactMetaStore) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(CONTACTS_META_KEY, JSON.stringify(next));
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 function touchContactMeta(id: string) {
@@ -272,8 +256,7 @@ function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-// ✅ FIX: Helius Enhanced tx objects don't guarantee `err` exists on your type.
-// We safely read error flags using `any` and a few common shapes.
+// Helius error detection helper
 function heliusHasError(tx: unknown): boolean {
   const t = tx as any;
   return Boolean(t?.transactionError || t?.err || t?.meta?.err);
@@ -283,8 +266,8 @@ function HomeInner() {
   const { connection } = useConnection();
   const { publicKey, connected, signTransaction, disconnect } = useWallet();
 
-  const [solBalance, setSolBalance] = useState<number | null>(null);
-  const [usdcBalance, setUsdcBalance] = useState<number | null>(null);
+  const [solBalance, setSolBalance] = useState<number>(0);
+  const [usdcBalance, setUsdcBalance] = useState<number>(0);
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
@@ -323,13 +306,11 @@ function HomeInner() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactName, setContactName] = useState("");
 
-  // Cash App / Venmo-style contact picker
+  // Picker
   const [contactsOpen, setContactsOpen] = useState(false);
   const [contactSearchQuery, setContactSearchQuery] = useState("");
 
-  // --------------------
-  // ✅ PREVIEW TRANSACTION (before Phantom)
-  // --------------------
+  // Preview Transaction
   const [showPreview, setShowPreview] = useState(false);
   const [previewAck, setPreviewAck] = useState(false);
   const [previewFeeText, setPreviewFeeText] = useState<string>("—");
@@ -337,29 +318,25 @@ function HomeInner() {
   const [previewWarn, setPreviewWarn] = useState<string | null>(null);
 
   const explorerUrl = txSig
-    ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
+    ? `https://explorer.solana.com/tx/${txSig}?cluster=${CLUSTER}`
     : null;
 
-  // Hydration-safe UI gate
+  // Hydration-safe gate
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   // --------------------
-  // ✅ QR helpers (Request QR parsing + validation)
+  // ✅ QR helpers
   // --------------------
-  function getBaseOrigin() {
-    return (
-      origin ||
-      (typeof window !== "undefined"
-        ? window.location.origin
-        : "https://example.com")
-    );
-  }
+  const [origin, setOrigin] = useState<string>("");
+  useEffect(() => {
+    if (!mounted) return;
+    setOrigin(window.location.origin);
+  }, [mounted]);
 
   function safeDecodeMaybe(input: string) {
     const s = (input ?? "").trim();
     if (!s) return "";
-    // If it's percent-encoded, try decoding once.
     if (/%[0-9A-Fa-f]{2}/.test(s)) {
       try {
         return decodeURIComponent(s);
@@ -382,13 +359,11 @@ function HomeInner() {
     if (isValidSolanaAddress(raw)) return { to: raw };
 
     // 2) solana:<address>?amount=...&memo=... (Solana Pay-ish)
-    //    We normalize to "solana://" so URL can parse consistently.
     if (/^solana:/i.test(raw)) {
       try {
         const normalized = raw.replace(/^solana:/i, "solana://");
         const u = new URL(normalized);
 
-        // host or pathname depending on how it's formed
         const addr =
           (u.hostname && u.hostname !== "solana" ? u.hostname : "") ||
           u.pathname.replace(/^\/+/, "");
@@ -411,20 +386,17 @@ function HomeInner() {
         }
 
         if (note) out.note = note.slice(0, 140);
-
         return out;
       } catch {
         return {};
       }
     }
 
-    // 3) Any URL (UTILIZAP request link or similar)
+    // 3) Any URL (?to=...&amount=...&note=...)
     try {
-      const u = new URL(raw, getBaseOrigin());
-
+      const u = new URL(raw, origin || "https://example.com");
       const to = (u.searchParams.get("to") ?? "").trim();
       const amount = (u.searchParams.get("amount") ?? "").trim();
-
       const note = (
         u.searchParams.get("note") ??
         u.searchParams.get("memo") ??
@@ -433,7 +405,6 @@ function HomeInner() {
       ).trim();
 
       const out: ParsedRequest = {};
-
       if (to && isValidSolanaAddress(to)) out.to = to;
 
       if (amount) {
@@ -442,7 +413,6 @@ function HomeInner() {
       }
 
       if (note) out.note = note.slice(0, 140);
-
       return out;
     } catch {
       return {};
@@ -458,61 +428,65 @@ function HomeInner() {
     return Boolean(parsed.to && isValidSolanaAddress(parsed.to));
   }
 
-  // ✅ Listen for amount emitted by QR scan (UTILIZAP request QR)
+  // Optional QR emitted events support
   useEffect(() => {
     if (!mounted) return;
 
-    const handler = (e: any) => {
+    const onAmt = (e: any) => {
       const raw = e?.detail?.amount;
       if (!raw) return;
-
       const clean = String(raw).trim();
       const n = Number(clean);
       if (!Number.isFinite(n) || n <= 0) return;
-
       setAmount(clean);
     };
 
-    window.addEventListener(UZ_QR_AMOUNT_EVENT, handler as any);
-    return () => window.removeEventListener(UZ_QR_AMOUNT_EVENT, handler as any);
-  }, [mounted]);
-
-  // ✅ Listen for note emitted by QR scan (optional support)
-  useEffect(() => {
-    if (!mounted) return;
-
-    const handler = (e: any) => {
+    const onNote = (e: any) => {
       const raw = e?.detail?.note ?? e?.detail?.memo ?? e?.detail?.message;
       if (!raw) return;
-
       const clean = String(raw).trim();
       if (!clean) return;
-
       setTxNote(clean.slice(0, 140));
     };
 
-    window.addEventListener(UZ_QR_NOTE_EVENT, handler as any);
-    return () => window.removeEventListener(UZ_QR_NOTE_EVENT, handler as any);
-  }, [mounted]);
-
-  // ✅ Listen for recipient emitted by QR scan (optional support)
-  useEffect(() => {
-    if (!mounted) return;
-
-    const handler = (e: any) => {
+    const onTo = (e: any) => {
       const raw = e?.detail?.to ?? e?.detail?.recipient ?? e?.detail?.address;
       if (!raw) return;
-
       const clean = String(raw).trim();
       if (!clean) return;
       if (!isValidSolanaAddress(clean)) return;
-
       setRecipient(clean);
     };
 
-    window.addEventListener(UZ_QR_TO_EVENT, handler as any);
-    return () => window.removeEventListener(UZ_QR_TO_EVENT, handler as any);
+    window.addEventListener(UZ_QR_AMOUNT_EVENT, onAmt as any);
+    window.addEventListener(UZ_QR_NOTE_EVENT, onNote as any);
+    window.addEventListener(UZ_QR_TO_EVENT, onTo as any);
+
+    return () => {
+      window.removeEventListener(UZ_QR_AMOUNT_EVENT, onAmt as any);
+      window.removeEventListener(UZ_QR_NOTE_EVENT, onNote as any);
+      window.removeEventListener(UZ_QR_TO_EVENT, onTo as any);
+    };
   }, [mounted]);
+
+  // UTILIZAP QR scan handler
+  function handleQrScan(scannedValue: string) {
+    const raw = (scannedValue ?? "").trim();
+    if (!raw) return;
+
+    const parsed = parsePaymentRequest(raw);
+
+    if (parsed.to && isValidSolanaAddress(parsed.to)) setRecipient(parsed.to);
+
+    if (parsed.amount) {
+      const n = Number(parsed.amount);
+      if (Number.isFinite(n) && n > 0) setAmount(parsed.amount);
+    }
+
+    if (parsed.note) setTxNote(parsed.note);
+
+    if (!parsed.to && isValidSolanaAddress(raw)) setRecipient(raw);
+  }
 
   function fmtWhen(ts: number) {
     try {
@@ -575,7 +549,6 @@ function HomeInner() {
     setReceiptNoteDraft("");
     setNoteSavedTick(false);
 
-    // preview reset
     setShowPreview(false);
     setPreviewAck(false);
     setPreviewFeeText("—");
@@ -595,18 +568,12 @@ function HomeInner() {
   // --------------------
   // REQUEST PAYMENT LINK (generator + copy + QR)
   // --------------------
-  const [origin, setOrigin] = useState<string>("");
   const [requestAmount, setRequestAmount] = useState<string>("");
-  const [requestNote, setRequestNote] = useState<string>(""); // ✅ NEW
+  const [requestNote, setRequestNote] = useState<string>("");
   const [copied, setCopied] = useState(false);
 
   const [showRequestQr, setShowRequestQr] = useState(false);
   const [requestQr, setRequestQr] = useState<string>("");
-
-  useEffect(() => {
-    if (!mounted) return;
-    setOrigin(window.location.origin);
-  }, [mounted]);
 
   const requestLink = useMemo(() => {
     if (!origin || !publicKey) return "";
@@ -618,16 +585,11 @@ function HomeInner() {
     const a = requestAmount.trim();
     if (a) {
       const n = Number(a);
-      if (Number.isFinite(n) && n > 0) {
-        params.set("amount", a);
-      }
+      if (Number.isFinite(n) && n > 0) params.set("amount", a);
     }
 
     const note = requestNote.trim();
-    if (note) {
-      // keep it reasonable so links don't get crazy long
-      params.set("note", note.slice(0, 140));
-    }
+    if (note) params.set("note", note.slice(0, 140));
 
     return `${origin}/?${params.toString()}`;
   }, [origin, publicKey, requestAmount, requestNote]);
@@ -638,27 +600,11 @@ function HomeInner() {
       await navigator.clipboard.writeText(requestLink);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1400);
-    } catch {
-      try {
-        const el = document.getElementById(
-          "uz-request-link"
-        ) as HTMLInputElement;
-        if (el) {
-          el.focus();
-          el.select();
-          document.execCommand("copy");
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1400);
-        }
-      } catch {
-        // ignore
-      }
-    }
+    } catch {}
   }
 
   useEffect(() => {
     let cancelled = false;
-
     async function run() {
       if (!requestLink) {
         setRequestQr("");
@@ -674,7 +620,6 @@ function HomeInner() {
         if (!cancelled) setRequestQr("");
       }
     }
-
     run();
     return () => {
       cancelled = true;
@@ -697,7 +642,7 @@ function HomeInner() {
 
     const to = searchParams.get("to");
     const amt = searchParams.get("amount");
-    const note = searchParams.get("note"); // ✅ NEW
+    const note = searchParams.get("note");
 
     let didAnything = false;
 
@@ -726,44 +671,14 @@ function HomeInner() {
     if (didAnything) setPrefillDone(true);
   }, [mounted, prefillDone, searchParams]);
 
-  // ✅ UTILIZAP QR scan handler: supports address, encoded URLs, request links, and solana: URIs
-  function handleQrScan(scannedValue: string) {
-    const raw = (scannedValue ?? "").trim();
-    if (!raw) return;
-
-    const parsed = parsePaymentRequest(raw);
-
-    if (parsed.to && isValidSolanaAddress(parsed.to)) {
-      setRecipient(parsed.to);
-    }
-
-    if (parsed.amount) {
-      const n = Number(parsed.amount);
-      if (Number.isFinite(n) && n > 0) setAmount(parsed.amount);
-    }
-
-    if (parsed.note) {
-      setTxNote(parsed.note);
-    }
-
-    // Fallback: if it was just a plain address and nothing else
-    if (!parsed.to && isValidSolanaAddress(raw)) {
-      setRecipient(raw);
-    }
-  }
-
-  // Load contacts
-  useEffect(() => {
-    setContacts(loadContacts());
-  }, []);
-
-  // Init + load receipts
+  // Load contacts + receipts
+  useEffect(() => setContacts(loadContacts()), []);
   useEffect(() => {
     ensureReceiptsStore();
     setReceipts(loadReceipts());
   }, []);
 
-  // Keep note draft in sync when opening receipt
+  // Keep note draft in sync
   useEffect(() => {
     if (!activeReceipt) {
       setReceiptNoteDraft("");
@@ -773,31 +688,30 @@ function HomeInner() {
     setNoteSavedTick(false);
   }, [activeReceipt]);
 
-  // Auto-open receipt when confirmed/failed
   useEffect(() => {
     if (!activeReceipt) return;
-    if (
-      activeReceipt.status === "confirmed" ||
-      activeReceipt.status === "failed"
-    ) {
+    if (activeReceipt.status === "confirmed" || activeReceipt.status === "failed")
       setShowReceipt(true);
-    }
   }, [activeReceipt]);
 
+  // ✅ BALANCES (mainnet) — don’t leave as "—"
   const refreshBalances = async () => {
     if (!publicKey) {
-      setSolBalance(null);
-      setUsdcBalance(null);
+      setSolBalance(0);
+      setUsdcBalance(0);
       return;
     }
+
     try {
       const sol = await getSolBalance(connection, publicKey);
       const usdc = await getSplTokenBalance(connection, publicKey);
-      setSolBalance(sol);
-      setUsdcBalance(usdc);
-    } catch {
-      setSolBalance(null);
-      setUsdcBalance(null);
+
+      setSolBalance(Number.isFinite(sol) ? sol : 0);
+      setUsdcBalance(Number.isFinite(usdc) ? usdc : 0);
+    } catch (e) {
+      console.error("refreshBalances failed:", e);
+      setSolBalance(0);
+      setUsdcBalance(0);
     }
   };
 
@@ -809,6 +723,7 @@ function HomeInner() {
   const canSend = useMemo(() => {
     if (!publicKey || !connected || !signTransaction) return false;
     if (!isValidSolanaAddress(recipient.trim())) return false;
+
     const amt = Number(amount);
     return Number.isFinite(amt) && amt > 0;
   }, [publicKey, connected, signTransaction, recipient, amount]);
@@ -819,7 +734,6 @@ function HomeInner() {
     return contacts.find((c) => c.address.trim().toLowerCase() === r) ?? null;
   }, [contacts, recipient]);
 
-  // Cash App-ish ordering: Recents first, then A-Z
   const contactsSorted = useMemo(() => {
     const meta = loadContactsMeta();
     const collator = new Intl.Collator(undefined, {
@@ -847,10 +761,7 @@ function HomeInner() {
     });
   }, [contactsSorted, contactSearchQuery]);
 
-  const recentContactChips = useMemo(() => {
-    // show up to 3 chips (Cash App-ish), the full list is inside the picker
-    return contactsSorted.slice(0, 3);
-  }, [contactsSorted]);
+  const recentContactChips = useMemo(() => contactsSorted.slice(0, 3), [contactsSorted]);
 
   function receiptBadgeClasses(status: TxReceiptStatus) {
     if (status === "confirmed")
@@ -884,7 +795,8 @@ function HomeInner() {
 
   /**
    * ✅ Helius import:
-   * Pull last N txs and create receipts for USDC token transfers.
+   * NOTE: This depends on your lib/helius.ts being configured for MAINNET + correct API key.
+   * We'll keep the logic, but label cluster mainnet.
    */
   async function syncHeliusUsdcReceipts(walletAddr: string) {
     if (!walletAddr) return;
@@ -898,7 +810,6 @@ function HomeInner() {
     try {
       const txs = await heliusAddressTransactions(walletAddr, { limit: 80 });
       const walletLower = walletAddr.toLowerCase();
-      const mint = USDC_MINT_DEVNET;
 
       const bySig = new Map<string, TxReceipt>();
 
@@ -907,10 +818,8 @@ function HomeInner() {
         if (!sig) continue;
 
         const tokenTransfers = (tx as any)?.tokenTransfers || [];
-        if (!Array.isArray(tokenTransfers) || tokenTransfers.length === 0)
-          continue;
+        if (!Array.isArray(tokenTransfers) || tokenTransfers.length === 0) continue;
 
-        // NET relative to wallet: + received, - sent
         let net = 0;
         let involved = false;
 
@@ -918,12 +827,11 @@ function HomeInner() {
         let bestTo = "";
 
         for (const t of tokenTransfers) {
-          if (!t?.mint || String(t.mint) !== mint) continue;
-
+          // If your Helius returns mint filtering internally, this may be fine.
+          // Otherwise your helius.ts should filter by USDC mint.
           const raw = (t as any)?.tokenAmount ?? (t as any)?.amount ?? 0;
 
           let amt = 0;
-
           if (typeof raw === "number") amt = raw;
           else if (typeof raw === "string") amt = Number(raw);
           else if (raw && typeof raw === "object") {
@@ -931,11 +839,9 @@ function HomeInner() {
             else if (typeof raw.uiAmountString === "string")
               amt = Number(raw.uiAmountString);
             else if (typeof raw.amount === "string") {
-              const decimals =
-                typeof raw.decimals === "number" ? raw.decimals : 0;
+              const decimals = typeof raw.decimals === "number" ? raw.decimals : 0;
               const intVal = Number(raw.amount);
-              if (Number.isFinite(intVal))
-                amt = intVal / Math.pow(10, decimals);
+              if (Number.isFinite(intVal)) amt = intVal / Math.pow(10, decimals);
             }
           }
 
@@ -966,13 +872,6 @@ function HomeInner() {
             bestTo = String(
               t?.toUserAccount || t?.toAccount || t?.toTokenAccount || ""
             );
-          } else {
-            involved = true;
-            net += amt;
-            bestFrom = String(
-              t?.fromUserAccount || t?.fromAccount || t?.fromTokenAccount || ""
-            );
-            bestTo = walletAddr;
           }
         }
 
@@ -981,32 +880,25 @@ function HomeInner() {
         const direction: TxReceiptDirection = net >= 0 ? "received" : "sent";
         const amountAbs = Math.abs(net);
 
-        const tsSeconds =
-          (tx as any)?.timestamp ?? (tx as any)?.blockTime ?? null;
-
+        const tsSeconds = (tx as any)?.timestamp ?? (tx as any)?.blockTime ?? null;
         const createdAt =
-          typeof tsSeconds === "number" && tsSeconds > 0
-            ? tsSeconds * 1000
-            : Date.now();
+          typeof tsSeconds === "number" && tsSeconds > 0 ? tsSeconds * 1000 : Date.now();
 
-        const status: TxReceiptStatus = heliusHasError(tx)
-          ? "failed"
-          : "confirmed";
+        const status: TxReceiptStatus = heliusHasError(tx) ? "failed" : "confirmed";
 
         const id = `h_${sig}`;
-
         const r: TxReceipt = {
           id,
           sig,
           createdAt,
-          cluster: "devnet",
+          cluster: "mainnet-beta",
           status,
           direction,
           amountUi: String(Number.isFinite(amountAbs) ? amountAbs : 0),
           tokenSymbol: "USDC",
           from: direction === "received" ? bestFrom || "" : walletAddr,
           to: direction === "received" ? walletAddr : bestTo || "",
-          explorerUrl: `https://explorer.solana.com/tx/${sig}?cluster=devnet`,
+          explorerUrl: `https://explorer.solana.com/tx/${sig}?cluster=${CLUSTER}`,
         };
 
         bySig.set(sig, r);
@@ -1031,7 +923,6 @@ function HomeInner() {
     }
   }
 
-  // Auto-sync once per wallet connect
   useEffect(() => {
     if (!publicKey || !connected) return;
 
@@ -1042,7 +933,6 @@ function HomeInner() {
         console.error("Helius sync failed (effect):", err);
       }
     })();
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publicKey, connected]);
 
@@ -1098,7 +988,7 @@ function HomeInner() {
       id: receiptId,
       sig: null,
       createdAt: Date.now(),
-      cluster: "devnet",
+      cluster: "mainnet-beta",
       status: "submitted",
       direction: "sent",
       amountUi,
@@ -1119,14 +1009,13 @@ function HomeInner() {
       setReceipts(loadReceipts());
       setActiveReceipt(receiptDraft);
 
-      const { signature, blockhash, lastValidBlockHeight } =
-        await sendUsdcDevnet({
-          connection,
-          sender: publicKey!,
-          recipient: new PublicKey(to),
-          amountUi,
-          signTransaction: signTransaction!,
-        });
+      const { signature, blockhash, lastValidBlockHeight } = await sendUsdc({
+        connection,
+        sender: publicKey!,
+        recipient: new PublicKey(to),
+        amountUi,
+        signTransaction: signTransaction!,
+      });
 
       setTxSig(signature);
       setTxStage("confirming");
@@ -1135,7 +1024,7 @@ function HomeInner() {
         ...receiptDraft,
         sig: signature,
         status: "confirming",
-        explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=devnet`,
+        explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=${CLUSTER}`,
       };
 
       upsertReceipt(withSig);
@@ -1156,9 +1045,8 @@ function HomeInner() {
       setActiveReceipt(confirmed);
 
       setTxStage("confirmed");
-      refreshBalances();
+      await refreshBalances();
 
-      // allow a re-sync later
       lastHeliusSyncRef.current = "";
     } catch (e: any) {
       setTxStage("failed");
@@ -1182,8 +1070,8 @@ function HomeInner() {
 
   const isConfirmed = txStage === "confirmed";
 
-  const usdcCash = usdcBalance === null ? "—" : formatUsd(usdcBalance);
-  const solPrecise = solBalance === null ? "—" : solBalance.toFixed(4);
+  const usdcCash = formatUsd(usdcBalance);
+  const solPrecise = solBalance.toFixed(4);
 
   function chooseContact(c: Contact) {
     setRecipient(c.address);
@@ -1197,7 +1085,6 @@ function HomeInner() {
       const next = prev.filter((c) => c.id !== id);
       saveContacts(next);
 
-      // also clean meta
       const meta = loadContactsMeta();
       if (meta[id]) {
         delete meta[id];
@@ -1227,9 +1114,7 @@ function HomeInner() {
       return next;
     });
 
-    // mark as used so it appears in recents immediately
     touchContactMeta(newContact.id);
-
     setContactName("");
   }
 
@@ -1267,9 +1152,7 @@ function HomeInner() {
     }
   }, [mounted, activeReceipt]);
 
-  // --------------------
-  // ✅ PREVIEW helpers
-  // --------------------
+  // Preview helpers
   const previewTo = useMemo(() => recipient.trim(), [recipient]);
   const previewFrom = useMemo(() => publicKey?.toBase58() ?? "", [publicKey]);
   const previewAmountPretty = useMemo(() => {
@@ -1280,6 +1163,8 @@ function HomeInner() {
 
   function openPreview() {
     setPreviewWarn(null);
+
+    // ✅ if button is enabled, this will open.
     if (!canSend || isBusy) return;
 
     try {
@@ -1307,6 +1192,7 @@ function HomeInner() {
         feePayer: publicKey,
         recentBlockhash: blockhash,
       });
+
       tx.add(
         SystemProgram.transfer({
           fromPubkey: publicKey,
@@ -1323,8 +1209,7 @@ function HomeInner() {
       if (lamports === null) return "—";
 
       const sol = lamports / LAMPORTS_PER_SOL;
-      const pretty =
-        sol === 0 ? "0" : sol < 0.0001 ? sol.toFixed(6) : sol.toFixed(4);
+      const pretty = sol === 0 ? "0" : sol < 0.0001 ? sol.toFixed(6) : sol.toFixed(4);
       return `${pretty} SOL (est.)`;
     } catch {
       return "—";
@@ -1364,11 +1249,9 @@ function HomeInner() {
 
   return (
     <main className="min-h-screen text-white bg-black relative uz-app">
-      {/* UTILIZAP PURPLE/BLUE BACKGROUND */}
       <div className="pointer-events-none absolute inset-0 uz-bg" />
 
       <div className="relative mx-auto w-full max-w-5xl px-4 sm:px-6 py-8">
-        {/* Header */}
         <header className="uz-shellHeader flex items-center justify-between gap-4 rounded-2xl px-4 sm:px-6 py-4">
           <div className="flex items-center gap-3 min-w-0">
             <img
@@ -1387,7 +1270,7 @@ function HomeInner() {
           <div className="flex items-center gap-3">
             <span className="hidden sm:inline-flex items-center gap-2 rounded-full uz-chip">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-400/90" />
-              Devnet
+              Mainnet
             </span>
 
             {mounted ? (
@@ -1403,16 +1286,12 @@ function HomeInner() {
           </div>
         </header>
 
-        {/* Content gate */}
         {connected && publicKey ? (
           <section className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left: Wallet */}
             <div className="uz-panel rounded-2xl p-5 sm:p-6">
               <div className="flex items-center justify-between gap-4">
                 <h2 className="text-lg font-bold">Wallet</h2>
-                <span className="text-xs text-white/70">
-                  Secure • Non-custodial
-                </span>
+                <span className="text-xs text-white/70">Secure • Non-custodial</span>
               </div>
 
               <div className="mt-4 rounded-xl uz-subpanel p-4 space-y-4">
@@ -1443,7 +1322,7 @@ function HomeInner() {
                     </div>
 
                     <div className="mt-2 text-[11px] text-white/60">
-                      USDC (devnet)
+                      USDC (mainnet)
                     </div>
                   </div>
 
@@ -1463,7 +1342,7 @@ function HomeInner() {
                       </div>
 
                       <span className="text-xs px-3 py-1 rounded-full uz-chip">
-                        Devnet
+                        Mainnet
                       </span>
                     </div>
                   </div>
@@ -1480,15 +1359,13 @@ function HomeInner() {
               </div>
             </div>
 
-            {/* Right: Send */}
             <div className="uz-panel rounded-2xl p-5 sm:p-6">
               <div className="flex items-center justify-between gap-4">
                 <h2 className="text-lg font-bold">Send USDC</h2>
-                <span className="text-xs text-white/70">Devnet</span>
+                <span className="text-xs text-white/70">Mainnet</span>
               </div>
 
               <div className="mt-4">
-                {/* Request payment link */}
                 <div className="mb-5 rounded-2xl uz-subpanel p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
@@ -1506,9 +1383,7 @@ function HomeInner() {
 
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="sm:col-span-1">
-                      <label className="text-xs text-white/70">
-                        Amount (optional)
-                      </label>
+                      <label className="text-xs text-white/70">Amount (optional)</label>
                       <input
                         value={requestAmount}
                         onChange={(e) => setRequestAmount(e.target.value)}
@@ -1519,11 +1394,8 @@ function HomeInner() {
                       />
                     </div>
 
-                    {/* ✅ NEW: request note */}
                     <div className="sm:col-span-2">
-                      <label className="text-xs text-white/70">
-                        Note (optional)
-                      </label>
+                      <label className="text-xs text-white/70">Note (optional)</label>
                       <input
                         value={requestNote}
                         onChange={(e) => setRequestNote(e.target.value)}
@@ -1642,7 +1514,6 @@ function HomeInner() {
                   )}
                 </div>
 
-                {/* Cash App / Venmo style: show ONLY a few "Recents" chips + a Contacts button */}
                 <div className="mb-4 rounded-2xl uz-subpanel p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
@@ -1682,13 +1553,11 @@ function HomeInner() {
                     </div>
                   )}
 
-                  {/* Recents chips (max 3) */}
                   {recentContactChips.length > 0 ? (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {recentContactChips.map((c) => {
                         const active =
-                          recipient.trim().toLowerCase() ===
-                          c.address.toLowerCase();
+                          recipient.trim().toLowerCase() === c.address.toLowerCase();
                         return (
                           <button
                             key={c.id}
@@ -1697,7 +1566,6 @@ function HomeInner() {
                             disabled={isBusy}
                             className={[
                               "rounded-full px-3 py-2 text-xs border transition",
-                              // ✅ FIX: no more white-on-white
                               active
                                 ? "bg-white/10 text-white border-white/15"
                                 : "bg-white/5 border-white/10 hover:bg-white/10 text-white",
@@ -1715,13 +1583,10 @@ function HomeInner() {
                     </div>
                   )}
 
-                  {/* Quick add (still on main screen like Venmo) */}
                   <div className="mt-4">
                     <div className="flex items-center justify-between">
                       <p className="text-xs text-white/70">Quick add</p>
-                      <p className="text-[11px] text-white/60">
-                        Saved on this device
-                      </p>
+                      <p className="text-[11px] text-white/60">Saved on this device</p>
                     </div>
 
                     <div className="mt-2 flex flex-col sm:flex-row gap-3">
@@ -1791,19 +1656,12 @@ function HomeInner() {
                     : "Preview Transaction"}
                 </button>
 
-                {txStage === "signing" && (
-                  <div className="mt-2 text-xs text-white/70">
-                    Approve in Phantom…
+                {txError ? (
+                  <div className="mt-3 rounded-xl border border-red-400/25 bg-red-400/10 px-4 py-3 text-xs text-red-100">
+                    {txError}
                   </div>
-                )}
+                ) : null}
 
-                {txStage === "confirming" && (
-                  <div className="mt-2 text-xs text-white/70">
-                    Confirming on Solana…
-                  </div>
-                )}
-
-                {/* RECEIPT HISTORY */}
                 <div className="mt-5 rounded-2xl overflow-hidden uz-subpanel">
                   <div className="px-4 py-3 border-b border-white/10">
                     <div className="flex items-start justify-between gap-3">
@@ -1823,17 +1681,13 @@ function HomeInner() {
                             lastHeliusSyncRef.current = "";
                             if (publicKey?.toBase58()) {
                               try {
-                                await syncHeliusUsdcReceipts(
-                                  publicKey.toBase58()
-                                );
+                                await syncHeliusUsdcReceipts(publicKey.toBase58());
                               } catch (e) {
-                                console.error(
-                                  "Helius sync failed (manual refresh):",
-                                  e
-                                );
+                                console.error("Helius sync failed (manual):", e);
                               }
                             }
                             refreshReceiptsFromStorage();
+                            await refreshBalances();
                           }}
                           className="uz-btn-secondary"
                         >
@@ -1852,7 +1706,6 @@ function HomeInner() {
                       </div>
                     </div>
 
-                    {/* Tabs */}
                     <div className="mt-3 flex items-center gap-2">
                       {(["all", "sent", "received"] as const).map((t) => (
                         <button
@@ -1861,17 +1714,12 @@ function HomeInner() {
                           onClick={() => setReceiptTab(t)}
                           className={[
                             "rounded-lg px-3 py-2 text-xs border transition",
-                            // ✅ FIX: no more white-on-white
                             receiptTab === t
                               ? "bg-white/10 text-white border-white/15"
                               : "bg-white/5 border-white/10 hover:bg-white/10 text-white",
                           ].join(" ")}
                         >
-                          {t === "all"
-                            ? "All"
-                            : t === "sent"
-                            ? "Sent"
-                            : "Received"}
+                          {t === "all" ? "All" : t === "sent" ? "Sent" : "Received"}
                         </button>
                       ))}
                     </div>
@@ -1891,9 +1739,7 @@ function HomeInner() {
                         <label className="text-xs text-white/70">Filter</label>
                         <select
                           value={receiptFilter}
-                          onChange={(e) =>
-                            setReceiptFilter(e.target.value as any)
-                          }
+                          onChange={(e) => setReceiptFilter(e.target.value as any)}
                           className="uz-input w-full mt-2"
                         >
                           <option value="all">All</option>
@@ -1932,9 +1778,7 @@ function HomeInner() {
                                       directionBadgeClasses(r.direction),
                                     ].join(" ")}
                                   >
-                                    {r.direction === "received"
-                                      ? "Received"
-                                      : "Sent"}
+                                    {r.direction === "received" ? "Received" : "Sent"}
                                   </span>
 
                                   <div className="text-sm font-semibold text-white truncate uz-receipt__amount">
@@ -2005,10 +1849,7 @@ function HomeInner() {
                                     const ok = await copyText(r.sig);
                                     if (ok) {
                                       setSigCopied(true);
-                                      window.setTimeout(
-                                        () => setSigCopied(false),
-                                        1200
-                                      );
+                                      window.setTimeout(() => setSigCopied(false), 1200);
                                     }
                                   }}
                                   className="uz-btn-secondary disabled:opacity-40 disabled:cursor-not-allowed"
@@ -2016,16 +1857,13 @@ function HomeInner() {
                                   {sigCopied ? "Copied ✓" : "Copy Tx"}
                                 </button>
 
-                                {/* ✅ FIX: Explorer stays UTILIZAP-styled (no white) */}
                                 <a
                                   href={r.explorerUrl ?? "#"}
                                   target="_blank"
                                   rel="noreferrer"
                                   className={[
                                     "uz-btn-secondary text-center",
-                                    r.explorerUrl
-                                      ? ""
-                                      : "opacity-40 pointer-events-none",
+                                    r.explorerUrl ? "" : "opacity-40 pointer-events-none",
                                   ].join(" ")}
                                 >
                                   Explorer
@@ -2047,9 +1885,7 @@ function HomeInner() {
           </section>
         ) : (
           <section className="mt-6 uz-panel rounded-2xl p-8 sm:p-10 text-center">
-            <div className="text-xs text-white/70">
-              UTILIZAP • Devnet Preview
-            </div>
+            <div className="text-xs text-white/70">UTILIZAP • Mainnet</div>
 
             <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight">
               Venmo-style USDC payments,
@@ -2081,11 +1917,11 @@ function HomeInner() {
         )}
 
         <footer className="mt-8 text-center text-xs text-white/60">
-          UTILIZAP • Non-custodial payments • Devnet environment
+          UTILIZAP • Non-custodial payments • Mainnet environment
         </footer>
       </div>
 
-      {/* ✅ CONTACTS PICKER MODAL (Cash App / Venmo style) */}
+      {/* CONTACTS PICKER MODAL */}
       {contactsOpen && (
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
           <button
@@ -2149,9 +1985,7 @@ function HomeInner() {
                                 key={c.id}
                                 className={[
                                   "flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10 last:border-b-0",
-                                  isSelected
-                                    ? "bg-white/10"
-                                    : "hover:bg-white/[0.06]",
+                                  isSelected ? "bg-white/10" : "hover:bg-white/[0.06]",
                                 ].join(" ")}
                               >
                                 <button
@@ -2207,7 +2041,7 @@ function HomeInner() {
         </div>
       )}
 
-      {/* ✅ RECEIPT MODAL (FINAL TRANSACTION RECEIPT + NOTE EDIT) */}
+      {/* RECEIPT MODAL */}
       {showReceipt && activeReceipt && (
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
           <button
@@ -2243,8 +2077,7 @@ function HomeInner() {
                         </span>
                       </div>
                       <div className="mt-0.5 text-xs text-white/70">
-                        {fmtWhen(activeReceipt.createdAt)} •{" "}
-                        {activeReceipt.cluster}
+                        {fmtWhen(activeReceipt.createdAt)} • {activeReceipt.cluster}
                       </div>
                     </div>
 
@@ -2258,7 +2091,6 @@ function HomeInner() {
                   </div>
 
                   <div className="px-5 py-5">
-                    {/* Amount */}
                     <div className="text-center">
                       <div className="text-[11px] uppercase tracking-wider text-white/70">
                         Amount
@@ -2271,16 +2103,13 @@ function HomeInner() {
                       </div>
                     </div>
 
-                    {/* Details */}
                     <div className="mt-5 rounded-2xl overflow-hidden uz-preview__panel">
                       <div className="px-4 py-3 border-b border-white/10">
                         <div className="text-[11px] uppercase tracking-wider text-white/70">
                           To
                         </div>
                         <div className="mt-1 text-sm text-white font-mono break-all">
-                          {activeReceipt.to
-                            ? shortMid(activeReceipt.to, 10, 10)
-                            : "—"}
+                          {activeReceipt.to ? shortMid(activeReceipt.to, 10, 10) : "—"}
                         </div>
                       </div>
 
@@ -2289,9 +2118,7 @@ function HomeInner() {
                           From
                         </div>
                         <div className="mt-1 text-sm text-white font-mono break-all">
-                          {activeReceipt.from
-                            ? shortMid(activeReceipt.from, 10, 10)
-                            : "—"}
+                          {activeReceipt.from ? shortMid(activeReceipt.from, 10, 10) : "—"}
                         </div>
                       </div>
 
@@ -2300,14 +2127,11 @@ function HomeInner() {
                           Tx Signature
                         </div>
                         <div className="mt-1 text-sm text-white font-mono break-all">
-                          {activeReceipt.sig
-                            ? shortMid(activeReceipt.sig, 14, 14)
-                            : "Pending…"}
+                          {activeReceipt.sig ? shortMid(activeReceipt.sig, 14, 14) : "Pending…"}
                         </div>
                       </div>
                     </div>
 
-                    {/* Note editor */}
                     <div className="mt-4 rounded-2xl px-4 py-3 uz-preview__panel">
                       <div className="flex items-center justify-between gap-3">
                         <div className="text-[11px] uppercase tracking-wider text-white/70">
@@ -2337,10 +2161,7 @@ function HomeInner() {
                             if (!activeReceipt) return;
                             updateReceiptNote(activeReceipt.id, receiptNoteDraft);
                             setNoteSavedTick(true);
-                            window.setTimeout(
-                              () => setNoteSavedTick(false),
-                              1400
-                            );
+                            window.setTimeout(() => setNoteSavedTick(false), 1400);
                           }}
                           className="uz-btn-secondary"
                         >
@@ -2355,10 +2176,7 @@ function HomeInner() {
                             if (!activeReceipt) return;
                             updateReceiptNote(activeReceipt.id, "");
                             setNoteSavedTick(true);
-                            window.setTimeout(
-                              () => setNoteSavedTick(false),
-                              1400
-                            );
+                            window.setTimeout(() => setNoteSavedTick(false), 1400);
                           }}
                           className="uz-btn-secondary"
                         >
@@ -2367,7 +2185,6 @@ function HomeInner() {
                       </div>
                     </div>
 
-                    {/* Actions */}
                     <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <button
                         type="button"
@@ -2391,9 +2208,7 @@ function HomeInner() {
                         rel="noreferrer"
                         className={[
                           "uz-preview__primary rounded-xl px-4 py-3 text-sm font-semibold text-center",
-                          activeReceipt.explorerUrl
-                            ? ""
-                            : "pointer-events-none opacity-40",
+                          activeReceipt.explorerUrl ? "" : "pointer-events-none opacity-40",
                         ].join(" ")}
                       >
                         Explorer →
@@ -2408,10 +2223,7 @@ function HomeInner() {
                           const ok = await copyText(receiptShareLink);
                           if (ok) {
                             setReceiptCopied(true);
-                            window.setTimeout(
-                              () => setReceiptCopied(false),
-                              1200
-                            );
+                            window.setTimeout(() => setReceiptCopied(false), 1200);
                           }
                         }}
                         disabled={!receiptShareLink}
@@ -2447,7 +2259,7 @@ function HomeInner() {
         </div>
       )}
 
-      {/* ✅ PREVIEW MODAL (BEFORE PHANTOM) */}
+      {/* PREVIEW MODAL */}
       {showPreview && (
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
           <button
@@ -2522,9 +2334,7 @@ function HomeInner() {
                         <div className="text-[11px] uppercase tracking-wider text-white/70">
                           Network
                         </div>
-                        <div className="mt-1 text-sm text-white">
-                          Solana Devnet
-                        </div>
+                        <div className="mt-1 text-sm text-white">Solana Mainnet</div>
                       </div>
 
                       <div className="px-4 py-3">
@@ -2534,9 +2344,7 @@ function HomeInner() {
                               Estimated Fee
                             </div>
                             <div className="mt-1 text-sm text-white">
-                              {previewFeeLoading
-                                ? "Calculating…"
-                                : previewFeeText}
+                              {previewFeeLoading ? "Calculating…" : previewFeeText}
                             </div>
                           </div>
 
@@ -2565,9 +2373,8 @@ function HomeInner() {
                           className="mt-0.5"
                         />
                         <span className="text-xs text-white/80">
-                          I confirm the recipient and amount are correct. I
-                          understand blockchain transactions are typically
-                          irreversible.
+                          I confirm the recipient and amount are correct. I understand
+                          blockchain transactions are typically irreversible.
                         </span>
                       </label>
                     </div>
@@ -2606,21 +2413,12 @@ function HomeInner() {
         </div>
       )}
 
-      {/* Complete ✓ pop animation */}
       <style jsx>{`
         @keyframes uzCompletePop {
-          0% {
-            transform: scale(1);
-          }
-          45% {
-            transform: scale(1.06);
-          }
-          70% {
-            transform: scale(0.98);
-          }
-          100% {
-            transform: scale(1);
-          }
+          0% { transform: scale(1); }
+          45% { transform: scale(1.06); }
+          70% { transform: scale(0.98); }
+          100% { transform: scale(1); }
         }
         .uz-complete-pop {
           animation: uzCompletePop 420ms ease-out;

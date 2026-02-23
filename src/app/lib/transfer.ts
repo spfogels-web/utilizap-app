@@ -6,7 +6,7 @@ import {
   createTransferCheckedInstruction,
 } from "@solana/spl-token";
 
-import { DEVNET_USDC_MINT, USDC_DECIMALS } from "./constants";
+import { USDC_MINT, USDC_DECIMALS } from "./constants";
 
 export function isValidSolanaAddress(value: string) {
   try {
@@ -30,7 +30,10 @@ function uiToBaseUnits(amountUi: number | string, decimals: number): bigint {
   );
 }
 
-export async function sendUsdcDevnet(params: {
+/**
+ * ✅ Network-agnostic USDC sender (works on mainnet or devnet depending on provider endpoint)
+ */
+export async function sendUsdc(params: {
   connection: Connection;
   sender: PublicKey;
   recipient: PublicKey;
@@ -41,28 +44,20 @@ export async function sendUsdcDevnet(params: {
 
   const amountBase = uiToBaseUnits(amountUi, USDC_DECIMALS);
 
-  // 🔒 Explicit ATA resolution
-  const senderAta = await getAssociatedTokenAddress(
-    DEVNET_USDC_MINT,
-    sender,
-    false
-  );
-
+  const senderAta = await getAssociatedTokenAddress(USDC_MINT, sender, false);
   const recipientAta = await getAssociatedTokenAddress(
-    DEVNET_USDC_MINT,
+    USDC_MINT,
     recipient,
     false
   );
 
-  // 🚨 Sender MUST have an ATA
   const senderAtaInfo = await connection.getAccountInfo(senderAta);
   if (!senderAtaInfo) {
-    throw new Error("Sender does not have a USDC token account");
+    throw new Error("Sender does not have a USDC token account (ATA).");
   }
 
   const ix = [];
 
-  // Create recipient ATA if missing
   const recipientAtaInfo = await connection.getAccountInfo(recipientAta);
   if (!recipientAtaInfo) {
     ix.push(
@@ -70,16 +65,15 @@ export async function sendUsdcDevnet(params: {
         sender,
         recipientAta,
         recipient,
-        DEVNET_USDC_MINT
+        USDC_MINT
       )
     );
   }
 
-  // ✅ Correct transfer: sender ATA → recipient ATA
   ix.push(
     createTransferCheckedInstruction(
       senderAta,
-      DEVNET_USDC_MINT,
+      USDC_MINT,
       recipientAta,
       sender,
       amountBase,
@@ -97,10 +91,9 @@ export async function sendUsdcDevnet(params: {
 
   const signed = await signTransaction(tx);
 
-  const signature = await connection.sendRawTransaction(
-    signed.serialize(),
-    { skipPreflight: false }
-  );
+  const signature = await connection.sendRawTransaction(signed.serialize(), {
+    skipPreflight: false,
+  });
 
   return { signature, blockhash, lastValidBlockHeight };
 }

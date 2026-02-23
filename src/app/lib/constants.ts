@@ -1,8 +1,14 @@
 // src/app/lib/constants.ts
 import { PublicKey } from "@solana/web3.js";
 
-export const DEVNET_USDC_MINT = new PublicKey(
-  "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
+/**
+ * ✅ MAINNET USDC mint
+ * Official USDC mint on Solana mainnet-beta
+ */
+export const USDC_MINT = new PublicKey(
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 );
 
 export const USDC_DECIMALS = 6;
+
+export const CLUSTER: "mainnet-beta" = "mainnet-beta";
